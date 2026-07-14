@@ -3,7 +3,7 @@
 export
 
 .PHONY: help setup build up down restart migrate makemigrations test lint format \
-        typecheck check logs shell dbshell superuser ensure-workspace ps
+        typecheck check logs shell dbshell superuser ensure-workspace seed-examples ps
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,9 @@ superuser: ## Create the first local owner account (interactive, no default pass
 
 ensure-workspace: ## Idempotently ensure the single default Workspace exists
 	docker compose run --rm web python manage.py ensure_default_workspace
+
+seed-examples: ## Idempotently seed example Hunt Profiles (draft status)
+	docker compose run --rm web python manage.py seed_hunt_profile_examples
 
 ps: ## Show running services
 	docker compose ps

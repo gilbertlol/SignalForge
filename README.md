@@ -6,18 +6,20 @@ evidence, deduplicate organizations and contacts, score prospects, centralize co
 and tasks, and coordinate human and AI operators — all while running on a developer laptop
 first and remaining deployable to a private server later.
 
-This repository implements **GOR-233 — Bootstrap the local-first Django platform** and
-**GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**: the
-technical foundation plus the core revenue-domain model and deterministic scoring engine the
-rest of SignalForge is built on. It intentionally does not yet contain messaging, lead
-discovery, or AI integration; see [Deferred work](#deferred-work) below.
+This repository implements **GOR-233 — Bootstrap the local-first Django platform**,
+**GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**, and
+**GOR-242 — Build reusable hunt profiles and opportunity criteria engine**: the technical
+foundation, the core revenue-domain model with a deterministic scoring engine, and a
+versioned, dry-run-able criteria engine for defining what SignalForge should hunt for. It
+intentionally does not yet contain messaging, live lead discovery, or AI integration; see
+[Deferred work](#deferred-work) below.
 
 ## Current implemented scope
 
 - Django + Django REST Framework project (`config/`) with environment-based settings
   (`local`, `test`, `production`) that share one `base.py`.
 - A modular-monolith layout under `apps/`: `core`, `accounts`, `organizations`, `contacts`,
-  `opportunities`, `evidence`, `scoring`, `tasks`, `audit`, `integrations`.
+  `opportunities`, `evidence`, `scoring`, `hunting`, `tasks`, `audit`, `integrations`.
 - A custom user model (`apps.accounts.User`) so the project never depends on Django's
   built-in `auth.User`.
 - A `Workspace` model and `WorkspaceScopedModel` abstract base (`apps.core`) so business
@@ -33,6 +35,10 @@ discovery, or AI integration; see [Deferred work](#deferred-work) below.
   `ScoreSnapshot`s across three independent families (prospect quality, score confidence,
   post-contact opportunity score), with an explain endpoint proving the "why" behind every
   score.
+- **Hunting** (`apps.hunting`): reusable, versioned `HuntProfile`s with a recursive AND/OR/NOT
+  criteria tree, a dry-run mode that evaluates a profile against real local Organizations, and
+  a create/clone/activate/pause/archive lifecycle — see
+  [Hunt profiles and the criteria engine](#hunt-profiles-and-the-criteria-engine).
 - A minimal `AuditLogEntry` model and `record()` service (`apps.audit`) — a base for future
   auditing, not the complete audit system.
 - A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for future lead sources,
@@ -75,7 +81,9 @@ make ensure-workspace
 `setup` copies `.env.example` to `.env` (if missing) and builds images. `up` starts db, redis,
 web, worker, and beat in the background. `migrate` applies database migrations.
 `ensure-workspace` idempotently creates the single default Workspace the API operates against
-(see below) — run it once after the first `migrate`.
+(see below) — run it once after the first `migrate`. Optionally follow with `make seed-examples`
+to create four example Hunt Profiles (see
+[Hunt profiles and the criteria engine](#hunt-profiles-and-the-criteria-engine)).
 
 The API is then reachable at `http://localhost:8000`. PostgreSQL and Redis are **not**
 published to the host by default — reach them via `make dbshell` or `docker compose exec`.
@@ -168,6 +176,41 @@ Redis → worker wiring; it has no business meaning.
   `workspace_id` in the API. When GOR-244 lands, this becomes real per-user workspace
   resolution without a schema change to the models above.
 
+## Hunt profiles and the criteria engine
+
+- A **Hunt Profile** (`POST /api/v1/hunt-profiles/`) is a reusable business-acquisition
+  thesis. Its criteria are a recursive AND/OR/NOT tree of leaf conditions (`{"field", "op",
+  "value"}` — the same shape `apps.scoring.ScoringRule` uses, via the shared
+  `apps.core.conditions` primitive), submitted as JSON and validated against a JSON Schema
+  (the `jsonschema` package) before anything is written.
+- **Versioned and immutable**: `POST /api/v1/hunt-profiles/{id}/versions/` builds an entirely
+  new `HuntProfileVersion` from scratch — there is no "edit criteria in place" endpoint.
+  Nothing under a version is ever updated afterward, so once GOR-235 records which version a
+  discovery run used, that run stays reproducible forever.
+- Leaf-level semantics beyond plain AND/OR/NOT (documented here because the source ticket
+  names these concepts without fully specifying how they interact): a matched
+  `is_hard_disqualifier` leaf excludes the candidate outright regardless of the rest of the
+  tree; every `is_required` leaf must match regardless of which branch of the tree it's in;
+  `weight` sums across matched non-disqualifier leaves into a total compared against the
+  version's `ResultThreshold.min_total_score`.
+- **Dry-run** (`POST /api/v1/hunt-profiles/{id}/dry-run/`) evaluates the criteria tree against
+  real local Organizations (all of them by default, or a specific `organization_ids` list) —
+  this is what makes dry-run meaningful today without GOR-235's discovery providers: it's the
+  exact same evaluation engine a live run would use. Results include matched/failed criteria
+  with reasons, total weight, evidence count, the latest `score_confidence` snapshot when one
+  exists, and a `recommended_next_action` (`review_queue` / `excluded` / `below_threshold`).
+- **Lifecycle**: `activate`, `pause`, `archive`, and `clone` actions on
+  `/api/v1/hunt-profiles/{id}/...`. Cloning copies the current version's entire tree into a
+  new draft profile's version 1.
+- `make seed-examples` creates four draft example profiles (automation agencies, local
+  professional services, SaaS companies, businesses hiring CRM/automation roles) — idempotent,
+  safe to run repeatedly, and doubles as a working example of the version-creation payload
+  shape (`apps/hunting/management/commands/seed_hunt_profile_examples.py`).
+- **Not built** (see [Deferred work](#deferred-work)): the natural-language AI-assisted
+  profile builder (GOR-243), a guided configuration UI (GOR-241), and an "execute" endpoint
+  that would trigger a live discovery run (GOR-235) — dry-run against local data is the real,
+  working substitute for the last one today.
+
 ## Configuration
 
 - `config/settings/base.py` holds every setting shared across environments.
@@ -198,19 +241,23 @@ and never stores a default credential.
 The following are intentionally **not** implemented in this ticket and belong to later Linear
 issues:
 
-- **GOR-235** — Lead discovery, enrichment providers, and scheduled hunting runs. Evidence can
-  be recorded via the API today, but nothing automatically populates it yet.
+- **GOR-235** — Lead discovery, enrichment providers, and scheduled hunting runs.
+  `apps.hunting` models `SearchScope`/`SourcePolicy`/`SchedulePolicy` as config for this, and
+  `dry_run` runs the real evaluation engine against local data, but there is no provider
+  integration or actual scheduled/triggered execution yet — `SchedulePolicy.is_enabled` isn't
+  wired to Celery Beat, since there's no discovery task to schedule.
 - **GOR-236** — Unified inbox, outreach approvals, and compliance controls. No `Conversation`/
   `Message` model exists — `Opportunity.first_contacted_at` only tracks *that* contact
   happened, not any communication content.
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
-- **GOR-242** — The reusable Hunt Profile / opportunity-criteria engine. `ScoringRule` here is
-  intentionally minimal (a flat field/op/value condition, no compound logic) — richer
-  criteria composition is that ticket's job.
+- **GOR-241** — The guided hunt-profile configuration UI (and any frontend at all — this
+  repository is API-only so far).
 - **GOR-243** — A concrete local/cloud AI model gateway. Only the `AIModelAdapter` interface
-  exists today (`apps/integrations/adapters.py`), with no implementation. Scoring is 100%
-  deterministic rule evaluation; no AI path exists to override it.
+  exists today (`apps/integrations/adapters.py`), with no implementation. Scoring and the
+  hunting criteria engine are both 100% deterministic rule evaluation — no AI path exists to
+  override either, and the natural-language hunt-profile builder GOR-242 calls for isn't
+  built, since it needs this gateway.
 - **GOR-244** — Full authentication, multi-user accounts, workspace membership, and role-based
   permissions. Today there is only a minimal custom `User` model and a single ensured default
   `Workspace` with no per-user membership — see

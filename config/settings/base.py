@@ -42,6 +42,7 @@ LOCAL_APPS = [
     "apps.opportunities",
     "apps.evidence",
     "apps.scoring",
+    "apps.hunting",
     "apps.tasks",
     "apps.audit",
     "apps.integrations",
