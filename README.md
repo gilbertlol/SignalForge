@@ -64,8 +64,9 @@ does not yet contain a command-center frontend or real external providers; see
   routes, ordered fallback, usage budgets, circuit breaking, schema validation, and invocation logs.
 - Canonical email/SMS conversations, approval-gated outreach, explainable eligibility checks,
   suppression and consent enforcement, reply classification, sequences, and mock transports.
-- An authenticated, permission-aware command-center shell with daily review, organization,
-  discovery-run monitoring, unified inbox approval, and global search workspaces.
+- An authenticated, permission-aware command center with daily review, guided Hunt Profile
+  creation and run launch, opportunity pipeline, organization, discovery monitoring, inbox
+  approval, and global search workspaces.
 
 ## Prerequisites
 
@@ -305,9 +306,8 @@ issues:
 
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
-- **GOR-241 remaining workspaces** — guided Hunt Profile/provider configuration, opportunity
-  pipeline interactions, team/agent operations, finance, risk, notifications, saved views, and
-  browser-level end-to-end coverage. The initial operational command center is implemented.
+- **GOR-241 remaining workspaces** — advanced criteria/provider configuration, team/agent
+  operations, finance, risk, notifications, saved views, and browser-level end-to-end coverage.
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
 - Any real (non-demo) lead-source, enrichment, or messaging provider — `EmailVerificationAdapter`

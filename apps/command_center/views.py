@@ -16,8 +16,21 @@ from apps.communications.models import Conversation, Message, MessageStatus
 from apps.communications.services import SendBlocked, approve_message, send_message
 from apps.contacts.models import Contact
 from apps.core.services import get_request_workspace
-from apps.discovery.models import DiscoveryRun, DiscoveryRunStatus, SourceRecord, SourceRecordStatus
+from apps.discovery.models import (
+    DiscoveryRun,
+    DiscoveryRunStatus,
+    DiscoveryRunTrigger,
+    SourceRecord,
+    SourceRecordStatus,
+)
+from apps.discovery.services import start_run
+from apps.discovery.tasks import run_discovery_task
+from apps.hunting.models import HuntProfile, HuntProfileStatus
+from apps.hunting.services import activate_version, archive, create_version, pause
+from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
+
+from .forms import HuntProfileForm, OpportunityStatusForm, ProfileActionForm
 
 
 def workspace_permission(key: str):
@@ -92,6 +105,124 @@ def review_queue(request: HttpRequest) -> HttpResponse:
         discovery_run__workspace=workspace, status=SourceRecordStatus.QUALIFIED
     ).select_related("organization", "discovery_run__hunt_profile_version__hunt_profile")[:100]
     return _render(request, "command_center/review_queue.html", {"records": records})
+
+
+@workspace_permission("prospects.access")
+def hunt_profiles(request: HttpRequest) -> HttpResponse:
+    profiles = HuntProfile.objects.filter(workspace=get_request_workspace(request)).select_related(
+        "current_version"
+    )
+    return _render(
+        request,
+        "command_center/hunt_profiles.html",
+        {"profiles": profiles, "action_form": ProfileActionForm()},
+    )
+
+
+@workspace_permission("prospects.access")
+def create_hunt_profile(request: HttpRequest) -> HttpResponse:
+    form = HuntProfileForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        workspace = get_request_workspace(request)
+        profile = HuntProfile.objects.create(
+            workspace=workspace,
+            name=form.cleaned_data["name"],
+            description=form.cleaned_data["description"],
+        )
+        criterion = {
+            "type": "criterion",
+            "category": "custom_attribute",
+            "field": "domain",
+            "op": "neq",
+            "value": "",
+            "weight": form.cleaned_data["minimum_score"],
+            "is_required": form.cleaned_data["require_domain"],
+        }
+        version = create_version(
+            profile,
+            criteria={"type": "group", "operator": "AND", "children": [criterion]},
+            source_policies=[
+                {
+                    "source_key": "demo",
+                    "max_records": form.cleaned_data["maximum_records"],
+                }
+            ],
+            result_threshold={"min_total_score": form.cleaned_data["minimum_score"]},
+        )
+        profile.current_version = version
+        profile.save(update_fields=["current_version", "updated_at"])
+        if form.cleaned_data["activate_now"]:
+            activate_version(profile, version)
+        messages.success(request, f"Hunt Profile “{profile.name}” created.")
+        return redirect("command_center:hunt-profiles")
+    return _render(request, "command_center/hunt_profile_form.html", {"form": form})
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def profile_action(request: HttpRequest, pk) -> HttpResponse:
+    profile = get_object_or_404(HuntProfile, workspace=get_request_workspace(request), pk=pk)
+    form = ProfileActionForm(request.POST)
+    if form.is_valid():
+        action = form.cleaned_data["action"]
+        if action == HuntProfileStatus.ACTIVE and profile.current_version:
+            activate_version(profile, profile.current_version)
+        elif action == HuntProfileStatus.PAUSED:
+            pause(profile)
+        elif action == HuntProfileStatus.ARCHIVED:
+            archive(profile)
+        messages.success(request, f"{profile.name} is now {action}.")
+    return redirect("command_center:hunt-profiles")
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def start_discovery(request: HttpRequest, pk) -> HttpResponse:
+    profile = get_object_or_404(HuntProfile, workspace=get_request_workspace(request), pk=pk)
+    if profile.current_version is None:
+        messages.error(request, "This Hunt Profile has no version to run.")
+        return redirect("command_center:hunt-profiles")
+    run = start_run(
+        profile.current_version,
+        trigger=DiscoveryRunTrigger.MANUAL,
+        initiated_by=cast(User, request.user),
+    )
+    run_discovery_task.delay(str(run.id))
+    messages.success(request, f"Discovery started for {profile.name}.")
+    return redirect("command_center:runs")
+
+
+@workspace_permission("prospects.access")
+def opportunity_pipeline(request: HttpRequest) -> HttpResponse:
+    selected_status = request.GET.get("status", "")
+    opportunities = Opportunity.objects.filter(
+        workspace=get_request_workspace(request)
+    ).select_related("organization", "primary_contact")
+    if selected_status in OpportunityStatus.values:
+        opportunities = opportunities.filter(status=selected_status)
+    columns = [
+        (value, label, opportunities.filter(status=value))
+        for value, label in OpportunityStatus.choices
+    ]
+    return _render(
+        request,
+        "command_center/pipeline.html",
+        {"columns": columns, "selected_status": selected_status},
+    )
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def opportunity_status(request: HttpRequest, pk) -> HttpResponse:
+    opportunity = get_object_or_404(Opportunity, workspace=get_request_workspace(request), pk=pk)
+    form = OpportunityStatusForm(request.POST)
+    if form.is_valid():
+        opportunity.status = form.cleaned_data["status"]
+        opportunity.save(update_fields=["status", "updated_at"])
+        messages.success(
+            request, f"{opportunity.title} moved to {opportunity.get_status_display()}."
+        )
+    return redirect("command_center:pipeline")
 
 
 @workspace_permission("prospects.access")

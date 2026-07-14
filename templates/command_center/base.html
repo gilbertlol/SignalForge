@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Command Center{% endblock %} · SignalForge</title>
     <link rel="stylesheet" href="{% static 'command_center/app.css' %}">
+    <link rel="stylesheet" href="{% static 'command_center/workspaces.css' %}">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -24,7 +25,9 @@
         <a href="{% url 'command_center:dashboard' %}">Command center</a>
         {% if nav.prospects %}
           <a href="{% url 'command_center:review-queue' %}">Daily review</a>
+          <a href="{% url 'command_center:hunt-profiles' %}">Hunt Profiles</a>
           <a href="{% url 'command_center:organizations' %}">Organizations</a>
+          <a href="{% url 'command_center:pipeline' %}">Opportunity pipeline</a>
           <a href="{% url 'command_center:runs' %}">System runs</a>
         {% endif %}
         {% if nav.communications %}<a href="{% url 'command_center:inbox' %}">Unified inbox</a>{% endif %}

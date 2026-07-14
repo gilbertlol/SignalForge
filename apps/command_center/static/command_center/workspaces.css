@@ -1,0 +1,72 @@
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(230px, 1fr));
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+}
+
+.pipeline-column {
+  min-width: 230px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.opportunity-card {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.opportunity-card > a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.opportunity-card small {
+  display: block;
+  color: var(--muted);
+  margin: 5px 0 14px;
+}
+
+.opportunity-card form,
+table form,
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+select,
+.form-panel input,
+.form-panel textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 9px 10px;
+  max-width: 100%;
+}
+
+.form-panel {
+  padding: 24px;
+  max-width: 760px;
+}
+
+.form-panel label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.form-panel input[type="text"],
+.form-panel input[type="number"],
+.form-panel textarea {
+  width: 100%;
+}
+
+.form-panel .helptext {
+  color: var(--muted);
+  font-size: 12px;
+}
