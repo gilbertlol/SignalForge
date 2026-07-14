@@ -45,6 +45,7 @@ LOCAL_APPS = [
     "apps.hunting",
     "apps.discovery",
     "apps.communications",
+    "apps.command_center",
     "apps.tasks",
     "apps.audit",
     "apps.integrations",
@@ -140,8 +141,8 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {"anon": "10/minute"},
 }
 
-LOGIN_URL = "/api/v1/auth/login/"
-LOGIN_REDIRECT_URL = "/admin/"
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
 EMAIL_BACKEND = env.str(
     "DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"

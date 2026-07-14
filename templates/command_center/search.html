@@ -1,0 +1,4 @@
+{% extends "command_center/base.html" %}{% block title %}Search{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Global search</p><h1>{% if query %}Results for “{{ query }}”{% else %}Search SignalForge{% endif %}</h1><p>Organizations and contacts in {{ workspace.name }}.</p></div></div>
+<section class="panel">{% if query|length < 2 %}<div class="empty">Enter at least two characters.</div>{% elif results %}{% for type, result, url in results %}<div class="search-result"><span class="eyebrow">{{ type }}</span>{% if url %}<a href="{{ url }}">{{ result }}</a>{% else %}<strong>{{ result }}</strong>{% endif %}</div>{% endfor %}{% else %}<div class="empty"><h2>No matches</h2><p>Try a company name, domain, contact name, or email.</p></div>{% endif %}</section>
+{% endblock %}

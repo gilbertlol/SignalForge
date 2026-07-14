@@ -1,0 +1,41 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Command Center{% endblock %} · SignalForge</title>
+    <link rel="stylesheet" href="{% static 'command_center/app.css' %}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <a class="brand" href="{% url 'command_center:dashboard' %}">SignalForge</a>
+      <form class="global-search" action="{% url 'command_center:search' %}" method="get" role="search">
+        <label class="sr-only" for="global-q">Search</label>
+        <input id="global-q" name="q" type="search" placeholder="Search organizations and contacts…" value="{{ request.GET.q|default:'' }}">
+        <kbd>/</kbd>
+      </form>
+      <div class="account"><span>{{ request.user.display_name|default:request.user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="button secondary">Sign out</button></form></div>
+    </header>
+    <div class="app-shell">
+      <nav class="sidebar" aria-label="Primary">
+        <p class="workspace-label">{{ workspace.name }}</p>
+        <a href="{% url 'command_center:dashboard' %}">Command center</a>
+        {% if nav.prospects %}
+          <a href="{% url 'command_center:review-queue' %}">Daily review</a>
+          <a href="{% url 'command_center:organizations' %}">Organizations</a>
+          <a href="{% url 'command_center:runs' %}">System runs</a>
+        {% endif %}
+        {% if nav.communications %}<a href="{% url 'command_center:inbox' %}">Unified inbox</a>{% endif %}
+        {% if nav.providers %}<a href="/api/v1/ai/providers/">AI providers</a>{% endif %}
+        {% if nav.users %}<a href="/api/v1/memberships/">Users</a>{% endif %}
+      </nav>
+      <main id="main" class="content" tabindex="-1">
+        {% if messages %}<div class="notices" aria-live="polite">{% for message in messages %}<p class="notice {{ message.tags }}">{{ message }}</p>{% endfor %}</div>{% endif %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+    <script>document.addEventListener("keydown",e=>{if(e.key==="/"&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName)){e.preventDefault();document.getElementById("global-q").focus();}});</script>
+  </body>
+</html>

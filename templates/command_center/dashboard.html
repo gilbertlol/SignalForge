@@ -1,0 +1,14 @@
+{% extends "command_center/base.html" %}
+{% block title %}Command Center{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Today</p><h1>Command center</h1><p>What needs attention across acquisition and outreach.</p></div></div>
+  <section class="metrics" aria-label="Operational summary">
+    <a class="metric" href="{% url 'command_center:review-queue' %}"><span>Review queue</span><strong>{{ review_count }}</strong><small>qualified candidates</small></a>
+    <a class="metric" href="{% url 'command_center:inbox' %}"><span>Approvals</span><strong>{{ pending_approval_count }}</strong><small>messages waiting</small></a>
+    <a class="metric" href="{% url 'command_center:runs' %}"><span>Active runs</span><strong>{{ active_run_count }}</strong><small>pending or running</small></a>
+    <a class="metric" href="{% url 'command_center:organizations' %}"><span>Organizations</span><strong>{{ organization_count }}</strong><small>known accounts</small></a>
+  </section>
+  <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Discovery</p><h2>Recent runs</h2></div><a href="{% url 'command_center:runs' %}">View all</a></div>
+    {% if recent_runs %}<div class="table-wrap"><table><thead><tr><th>Profile</th><th>Status</th><th>Qualified</th><th>Failed</th><th>Started</th></tr></thead><tbody>{% for run in recent_runs %}<tr><td>{{ run.hunt_profile_version.hunt_profile.name }}</td><td><span class="status status-{{ run.status }}">{{ run.get_status_display }}</span></td><td>{{ run.records_qualified }}</td><td>{{ run.records_failed }}</td><td>{{ run.started_at|default:"Not started" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><h3>No discovery runs yet</h3><p>Activate a Hunt Profile and start a run through the API while the guided builder is in progress.</p></div>{% endif %}
+  </section>
+{% endblock %}
