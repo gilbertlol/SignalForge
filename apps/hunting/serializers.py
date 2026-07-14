@@ -2,7 +2,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.core.services import get_default_workspace
+from apps.core.services import get_request_workspace
 
 from . import services
 from .models import HuntProfile, HuntProfileVersion
@@ -74,7 +74,7 @@ class HuntProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "status", "current_version", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]) -> HuntProfile:
-        workspace = get_default_workspace()
+        workspace = get_request_workspace(self.context["request"])
         profile = HuntProfile.objects.create(
             workspace=workspace,
             name=validated_data["name"],

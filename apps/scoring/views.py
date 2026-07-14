@@ -4,7 +4,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.core.services import get_default_workspace
+from apps.accounts.permissions import HasWorkspacePermission
+from apps.core.services import get_request_workspace
 from apps.opportunities.models import Opportunity
 from apps.organizations.models import Organization
 
@@ -17,10 +18,12 @@ _VALID_FAMILIES = {choice.value for choice in ScoreFamily}
 
 class ScoreSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ScoreSnapshotSerializer
+    permission_classes = [HasWorkspacePermission]
+    required_workspace_permission = "prospects.access"
     filterset_fields = ["family"]
 
     def get_queryset(self):
-        return ScoreSnapshot.objects.filter(workspace=get_default_workspace())
+        return ScoreSnapshot.objects.filter(workspace=get_request_workspace(self.request))
 
 
 class _ScoreForSubjectView(APIView):
@@ -28,12 +31,18 @@ class _ScoreForSubjectView(APIView):
 
     subject_model: type
     subject_url_kwarg = "subject_id"
+    permission_classes = [HasWorkspacePermission]
+    required_workspace_permission = "prospects.access"
 
     def get_subject_or_400(self, family: str, **kwargs):
         """Returns the subject instance, or a Response if `family` is invalid."""
         if family not in _VALID_FAMILIES:
             return Response({"detail": f"Unknown score family {family!r}."}, status=400)
-        return get_object_or_404(self.subject_model, pk=kwargs[self.subject_url_kwarg])
+        return get_object_or_404(
+            self.subject_model,
+            pk=kwargs[self.subject_url_kwarg],
+            workspace=get_request_workspace(self.request),
+        )
 
 
 class _ScoreExplainView(_ScoreForSubjectView):

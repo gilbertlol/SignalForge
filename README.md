@@ -9,7 +9,8 @@ first and remaining deployable to a private server later.
 This repository implements **GOR-233 — Bootstrap the local-first Django platform**,
 **GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**,
 **GOR-242 — Build reusable hunt profiles and opportunity criteria engine**, and
-**GOR-235 — Build lead discovery, enrichment, and daily hunting runs**: the technical
+**GOR-235 — Build lead discovery, enrichment, and daily hunting runs**, plus the backend
+security foundation for **GOR-244 — secure accounts, workspaces, and role isolation**: the technical
 foundation, the core revenue-domain model with a deterministic scoring engine, a versioned
 criteria engine for defining what SignalForge should hunt for, and a resumable pipeline that
 actually discovers, deduplicates, enriches, and scores candidates end to end. It intentionally
@@ -54,6 +55,8 @@ does not yet contain messaging, a frontend, or AI integration; see
 - `/health/live` and `/health/ready` endpoints.
 - Structured JSON application logging.
 - Automated tests (pytest + pytest-django + factory_boy), Ruff, mypy, and pre-commit.
+- Workspace memberships, built-in roles with granular overrides, invitations,
+  tracked/revocable sessions, scoped API keys, login throttling, and security audit events.
 
 ## Prerequisites
 
@@ -83,6 +86,7 @@ make setup
 make up
 make migrate
 make ensure-workspace
+docker compose run --rm web python manage.py bootstrap_owner
 ```
 
 `setup` copies `.env.example` to `.env` (if missing) and builds images. `up` starts db, redis,

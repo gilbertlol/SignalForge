@@ -1,11 +1,15 @@
 from django.contrib import admin
+from django.shortcuts import redirect
 from django.urls import include, path
 
 from config.api_router import router
 
 urlpatterns = [
+    path("", lambda request: redirect("login")),
+    path("accounts/", include("django.contrib.auth.urls")),
     path("admin/", admin.site.urls),
     path("health/", include("apps.core.health.urls")),
+    path("api/v1/auth/", include("apps.accounts.urls")),
     path("api/v1/", include("apps.core.api.urls")),
     path("api/v1/", include(router.urls)),
     path("api/v1/", include("apps.evidence.urls")),

@@ -4,7 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.core.services import get_default_workspace
+from apps.accounts.permissions import HasWorkspacePermission
+from apps.core.services import get_request_workspace
 
 from .models import DiscoveryRun, DiscoveryRunStatus
 from .serializers import (
@@ -25,10 +26,12 @@ _TERMINAL_STATUSES = {
 
 class DiscoveryRunViewSet(viewsets.ModelViewSet):
     serializer_class = DiscoveryRunSerializer
+    permission_classes = [HasWorkspacePermission]
+    required_workspace_permission = "prospects.access"
     filterset_fields = ["status", "trigger"]
 
     def get_queryset(self):
-        return DiscoveryRun.objects.filter(workspace=get_default_workspace())
+        return DiscoveryRun.objects.filter(workspace=get_request_workspace(self.request))
 
     def _get_run(self, pk) -> DiscoveryRun:
         """Fetches by pk without going through `filter_queryset()` — the

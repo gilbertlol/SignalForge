@@ -2,7 +2,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.core.services import get_default_workspace
+from apps.core.services import get_request_workspace
 
 from .models import Organization
 from .services import create_organization, normalize_domain
@@ -23,7 +23,7 @@ class OrganizationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "dedupe_key", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]) -> Organization:
-        workspace = get_default_workspace()
+        workspace = get_request_workspace(self.context["request"])
         organization, _ = create_organization(
             workspace,
             name=validated_data.get("name", ""),

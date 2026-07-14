@@ -8,6 +8,7 @@ this router -> domain apps).
 
 from rest_framework.routers import DefaultRouter
 
+from apps.accounts.views import APIKeyViewSet, MembershipViewSet, SessionViewSet
 from apps.contacts.views import ContactViewSet
 from apps.discovery.views import DiscoveryRunViewSet
 from apps.hunting.views import HuntProfileViewSet
@@ -16,6 +17,9 @@ from apps.organizations.views import OrganizationViewSet
 from apps.scoring.views import ScoreSnapshotViewSet
 
 router = DefaultRouter()
+router.register("memberships", MembershipViewSet, basename="membership")
+router.register("api-keys", APIKeyViewSet, basename="api-key")
+router.register("sessions", SessionViewSet, basename="session")
 router.register("organizations", OrganizationViewSet, basename="organization")
 router.register("contacts", ContactViewSet, basename="contact")
 router.register("opportunities", OpportunityViewSet, basename="opportunity")

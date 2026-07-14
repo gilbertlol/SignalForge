@@ -1,7 +1,18 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import User
+from .models import (
+    AccessPermission,
+    APIKey,
+    Invitation,
+    LoginAttempt,
+    Membership,
+    PersonalPreference,
+    Role,
+    SecurityAuditEvent,
+    User,
+    UserSession,
+)
 
 
 @admin.register(User)
@@ -28,3 +39,14 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+
+admin.site.register(AccessPermission)
+admin.site.register(Role)
+admin.site.register(Membership)
+admin.site.register(Invitation)
+admin.site.register(UserSession)
+admin.site.register(LoginAttempt)
+admin.site.register(PersonalPreference)
+admin.site.register(APIKey)
+admin.site.register(SecurityAuditEvent)

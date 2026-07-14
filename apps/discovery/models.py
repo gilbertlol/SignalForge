@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 from apps.core.models import BaseModel, WorkspaceScopedModel
@@ -59,6 +60,13 @@ class DiscoveryRun(WorkspaceScopedModel):
     finished_at = models.DateTimeField(null=True, blank=True)
     checkpoint = models.JSONField(default=dict, blank=True)
     error_summary = models.TextField(blank=True)
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="initiated_discovery_runs",
+    )
 
     records_discovered = models.IntegerField(default=0)
     records_deduplicated = models.IntegerField(default=0)

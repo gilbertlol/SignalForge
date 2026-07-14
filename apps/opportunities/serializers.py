@@ -2,7 +2,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.core.services import get_default_workspace
+from apps.core.services import get_request_workspace
 
 from .models import Opportunity
 
@@ -26,5 +26,5 @@ class OpportunitySerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "contacted", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]) -> Opportunity:
-        validated_data["workspace"] = get_default_workspace()
+        validated_data["workspace"] = get_request_workspace(self.context["request"])
         return Opportunity.objects.create(**validated_data)

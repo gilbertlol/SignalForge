@@ -45,11 +45,14 @@ class _EffectiveSourcePolicy:
     budget_cents: int | None
 
 
-def start_run(hunt_profile_version: HuntProfileVersion, *, trigger: str) -> DiscoveryRun:
+def start_run(
+    hunt_profile_version: HuntProfileVersion, *, trigger: str, initiated_by=None
+) -> DiscoveryRun:
     return DiscoveryRun.objects.create(
         workspace=hunt_profile_version.profile.workspace,
         hunt_profile_version=hunt_profile_version,
         trigger=trigger,
+        initiated_by=initiated_by,
     )
 
 

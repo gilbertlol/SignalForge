@@ -2,7 +2,7 @@ from typing import Any
 
 from rest_framework import serializers
 
-from apps.core.services import get_default_workspace
+from apps.core.services import get_request_workspace
 
 from .models import Contact
 from .services import find_or_create_by_email
@@ -25,7 +25,7 @@ class ContactSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "dedupe_key", "created_at", "updated_at"]
 
     def create(self, validated_data: dict[str, Any]) -> Contact:
-        workspace = get_default_workspace()
+        workspace = get_request_workspace(self.context["request"])
         email = validated_data.pop("email", "")
         if email:
             contact, _ = find_or_create_by_email(workspace, email, defaults=validated_data)

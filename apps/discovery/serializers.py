@@ -3,7 +3,7 @@ from typing import Any
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 
-from apps.core.services import get_default_workspace
+from apps.core.services import get_request_workspace
 from apps.hunting.models import HuntProfile
 
 from .models import DiscoveryRun, DiscoveryRunTrigger, SourceRecord
@@ -53,6 +53,7 @@ class DiscoveryRunSerializer(serializers.ModelSerializer):
             "records_failed",
             "cost_cents",
             "error_summary",
+            "initiated_by",
             "created_at",
         ]
         read_only_fields = [
@@ -69,11 +70,12 @@ class DiscoveryRunSerializer(serializers.ModelSerializer):
             "records_failed",
             "cost_cents",
             "error_summary",
+            "initiated_by",
             "created_at",
         ]
 
     def create(self, validated_data: dict[str, Any]) -> DiscoveryRun:
-        workspace = get_default_workspace()
+        workspace = get_request_workspace(self.context["request"])
         profile = get_object_or_404(
             HuntProfile, id=validated_data["hunt_profile"], workspace=workspace
         )
@@ -81,7 +83,11 @@ class DiscoveryRunSerializer(serializers.ModelSerializer):
         if version is None:
             raise serializers.ValidationError({"hunt_profile": "Profile has no version yet."})
 
-        run = start_run(version, trigger=DiscoveryRunTrigger.MANUAL)
+        run = start_run(
+            version,
+            trigger=DiscoveryRunTrigger.MANUAL,
+            initiated_by=self.context["request"].user,
+        )
         run_discovery_task.delay(str(run.id))
         run.refresh_from_db()
         return run

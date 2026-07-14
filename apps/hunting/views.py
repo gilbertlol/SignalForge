@@ -3,7 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.core.services import get_default_workspace
+from apps.accounts.permissions import HasWorkspacePermission
+from apps.core.services import get_request_workspace
 from apps.organizations.models import Organization
 
 from . import services
@@ -19,10 +20,12 @@ from .serializers import (
 
 class HuntProfileViewSet(viewsets.ModelViewSet):
     serializer_class = HuntProfileSerializer
+    permission_classes = [HasWorkspacePermission]
+    required_workspace_permission = "prospects.access"
     filterset_fields = ["status"]
 
     def get_queryset(self):
-        return HuntProfile.objects.filter(workspace=get_default_workspace())
+        return HuntProfile.objects.filter(workspace=get_request_workspace(self.request))
 
     @action(detail=True, methods=["get", "post"])
     def versions(self, request: Request, pk=None) -> Response:
