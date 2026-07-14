@@ -6,21 +6,33 @@ evidence, deduplicate organizations and contacts, score prospects, centralize co
 and tasks, and coordinate human and AI operators — all while running on a developer laptop
 first and remaining deployable to a private server later.
 
-This repository implements **GOR-233 — Bootstrap the local-first Django platform**: the
-technical foundation the rest of SignalForge is built on. It intentionally does not yet
-contain business logic; see [Deferred work](#deferred-work) below.
+This repository implements **GOR-233 — Bootstrap the local-first Django platform** and
+**GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**: the
+technical foundation plus the core revenue-domain model and deterministic scoring engine the
+rest of SignalForge is built on. It intentionally does not yet contain messaging, lead
+discovery, or AI integration; see [Deferred work](#deferred-work) below.
 
 ## Current implemented scope
 
 - Django + Django REST Framework project (`config/`) with environment-based settings
   (`local`, `test`, `production`) that share one `base.py`.
 - A modular-monolith layout under `apps/`: `core`, `accounts`, `organizations`, `contacts`,
-  `opportunities`, `tasks`, `audit`, `integrations`.
+  `opportunities`, `evidence`, `scoring`, `tasks`, `audit`, `integrations`.
 - A custom user model (`apps.accounts.User`) so the project never depends on Django's
   built-in `auth.User`.
-- A `Workspace` model and `WorkspaceScopedModel` abstract base (`apps.core`) so future
-  business models can be tenant-scoped without a later migration overhaul. Full multi-tenancy
-  and auth are GOR-244.
+- A `Workspace` model and `WorkspaceScopedModel` abstract base (`apps.core`) so business
+  models are tenant-scoped from the start. Full multi-tenancy (multiple workspaces, per-user
+  membership) is GOR-244; until then, the API operates against a single ensured default
+  workspace — see [Domain model, evidence, and scoring](#domain-model-evidence-and-scoring).
+- **Organization**, **Contact**, and **Opportunity** models with merge-safe deduplication
+  (`apps.organizations`, `apps.contacts`, `apps.opportunities`), plus a REST API
+  (serializers, viewsets, filtering) for each.
+- **Evidence** (`apps.evidence`): provenance records (source, reliability, verification
+  status, observed date) attachable to an Organization or Opportunity.
+- **Scoring** (`apps.scoring`): a deterministic rule engine producing immutable
+  `ScoreSnapshot`s across three independent families (prospect quality, score confidence,
+  post-contact opportunity score), with an explain endpoint proving the "why" behind every
+  score.
 - A minimal `AuditLogEntry` model and `record()` service (`apps.audit`) — a base for future
   auditing, not the complete audit system.
 - A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for future lead sources,
@@ -54,10 +66,16 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 ## Starting the stack
 
 ```bash
-make setup   # copies .env.example -> .env (if missing) and builds images
-make up      # starts db, redis, web, worker, beat in the background
-make migrate # applies database migrations
+make setup
+make up
+make migrate
+make ensure-workspace
 ```
+
+`setup` copies `.env.example` to `.env` (if missing) and builds images. `up` starts db, redis,
+web, worker, and beat in the background. `migrate` applies database migrations.
+`ensure-workspace` idempotently creates the single default Workspace the API operates against
+(see below) — run it once after the first `migrate`.
 
 The API is then reachable at `http://localhost:8000`. PostgreSQL and Redis are **not**
 published to the host by default — reach them via `make dbshell` or `docker compose exec`.
@@ -118,6 +136,38 @@ Redis → worker wiring; it has no business meaning.
   `"unavailable"` per failed check otherwise. Responses never include exception text, stack
   traces, or configuration values.
 
+## Domain model, evidence, and scoring
+
+- **Organization / Contact / Opportunity** (`apps/organizations`, `apps/contacts`,
+  `apps/opportunities`) are the core revenue-domain entities. `POST /api/v1/organizations/`
+  and `POST /api/v1/contacts/` are dedup-aware: creating an org/contact with a
+  domain/email that already exists in the workspace returns the existing record rather than
+  a duplicate (`apps.organizations.services.find_or_create_by_domain`,
+  `apps.contacts.services.find_or_create_by_email`). Records without a known domain/email
+  simply aren't deduplicated.
+- **Evidence** (`apps/evidence`) attaches provenance to an Organization or Opportunity via a
+  generic relation: `POST /api/v1/organizations/{id}/evidence/` and
+  `POST /api/v1/opportunities/{id}/evidence/`. Freshness is never stored as a field (a static
+  "freshness" value goes stale the moment time passes) — it's the `age_days` computed
+  property, read live by the scoring engine.
+- **Scoring** (`apps/scoring`) evaluates configurable `ScoringRule`s against a subject
+  (and its evidence) to produce an immutable `ScoreSnapshot` for one of three families:
+  `prospect_quality`, `score_confidence`, `opportunity_score`. A matched hard-disqualifier
+  rule forces the score to `0` regardless of other positive points. Every rule's
+  match/no-match outcome is recorded in the snapshot's `components`, so:
+  - `POST /api/v1/organizations/{id}/scores/{family}/recompute/` — runs the rules and
+    persists a new snapshot.
+  - `GET /api/v1/organizations/{id}/scores/{family}/explain/` — returns the latest snapshot
+    verbatim (no recomputation), which is exactly "why this score was calculated."
+  - The equivalent `opportunities/{id}/scores/{family}/...` endpoints exist too.
+  - Snapshots can never be edited after creation (`apps.scoring.exceptions.ImmutableRecordError`
+    on any second `.save()`), so historical explanations stay accurate even if rules change later.
+- **Single default workspace**: GOR-244 (multi-user auth, workspace membership) doesn't exist
+  yet, so every API endpoint operates against one workspace ensured by
+  `make ensure-workspace` / `apps.core.services.get_default_workspace()` — there is no
+  `workspace_id` in the API. When GOR-244 lands, this becomes real per-user workspace
+  resolution without a schema change to the models above.
+
 ## Configuration
 
 - `config/settings/base.py` holds every setting shared across environments.
@@ -148,15 +198,25 @@ and never stores a default credential.
 The following are intentionally **not** implemented in this ticket and belong to later Linear
 issues:
 
-- **GOR-234** — Real domain models for `organizations`, `contacts`, and `opportunities`
-  (currently empty app skeletons), plus evidence collection, deduplication, and scoring.
+- **GOR-235** — Lead discovery, enrichment providers, and scheduled hunting runs. Evidence can
+  be recorded via the API today, but nothing automatically populates it yet.
+- **GOR-236** — Unified inbox, outreach approvals, and compliance controls. No `Conversation`/
+  `Message` model exists — `Opportunity.first_contacted_at` only tracks *that* contact
+  happened, not any communication content.
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
+- **GOR-242** — The reusable Hunt Profile / opportunity-criteria engine. `ScoringRule` here is
+  intentionally minimal (a flat field/op/value condition, no compound logic) — richer
+  criteria composition is that ticket's job.
 - **GOR-243** — A concrete local/cloud AI model gateway. Only the `AIModelAdapter` interface
-  exists today (`apps/integrations/adapters.py`), with no implementation.
+  exists today (`apps/integrations/adapters.py`), with no implementation. Scoring is 100%
+  deterministic rule evaluation; no AI path exists to override it.
 - **GOR-244** — Full authentication, multi-user accounts, workspace membership, and role-based
-  permissions. Today there is only a minimal custom `User` model and a standalone `Workspace`
-  model with no membership relationship between them yet.
+  permissions. Today there is only a minimal custom `User` model and a single ensured default
+  `Workspace` with no per-user membership — see
+  [Domain model, evidence, and scoring](#domain-model-evidence-and-scoring).
+- Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
+  on normalized domain/email only.
 - Any real lead-source or messaging provider integration — `apps.integrations.adapters` only
   defines the seam (`LeadSourceAdapter`, `MessagingAdapter`), not an implementation.
 - A production deployment target (reverse proxy, TLS termination, process manager beyond

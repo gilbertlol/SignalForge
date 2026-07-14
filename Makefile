@@ -3,7 +3,7 @@
 export
 
 .PHONY: help setup build up down restart migrate makemigrations test lint format \
-        typecheck check logs shell dbshell superuser ps
+        typecheck check logs shell dbshell superuser ensure-workspace ps
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -60,6 +60,9 @@ dbshell: ## Open a psql shell against the local database
 
 superuser: ## Create the first local owner account (interactive, no default password)
 	docker compose run --rm web python manage.py createsuperuser
+
+ensure-workspace: ## Idempotently ensure the single default Workspace exists
+	docker compose run --rm web python manage.py ensure_default_workspace
 
 ps: ## Show running services
 	docker compose ps
