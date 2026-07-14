@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude_ai_Linear__get_issue",
+      "mcp__claude_ai_Linear__get_project",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(pip3 --version)"
+    ]
+  }
+}

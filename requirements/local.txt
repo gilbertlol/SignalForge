@@ -1,0 +1,7 @@
+-r test.txt
+
+ruff>=0.5,<0.6
+mypy>=1.10,<1.11
+django-stubs>=5.0,<5.1
+djangorestframework-stubs>=3.15,<3.16
+pre-commit>=3.7,<3.8

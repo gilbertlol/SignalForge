@@ -1,0 +1,48 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+# DJ001: nullable CharField/TextField is fine for optional text fields.
+# DJ012: flags our deliberate `objects` (soft-delete) + `all_objects` (unfiltered)
+# manager pairing on SoftDeleteModel as out of order; the order is intentional.
+ignore = ["DJ001", "DJ012"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"config/settings/*.py" = ["F403", "F405"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+mypy_path = "."
+files = ["apps", "config"]
+exclude = "migrations/"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = "*.migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+# factory_boy's DjangoModelFactory has no type stubs: mypy sees `FooFactory()`
+# as returning a FooFactory instance rather than the model it builds, which
+# produces false positives throughout every test module that uses one.
+module = "apps.*.tests.*"
+ignore_errors = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["tests.py", "test_*.py"]
+addopts = "--reuse-db"
