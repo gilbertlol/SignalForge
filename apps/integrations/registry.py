@@ -5,9 +5,15 @@ names — it asks the registry for "the lead source adapter for 'demo'"
 instead of importing a concrete class directly.
 """
 
-from .adapters import AIModelAdapter, LeadSourceAdapter, TechnologyDetectionAdapter
+from .adapters import (
+    AIModelAdapter,
+    LeadSourceAdapter,
+    MessagingAdapter,
+    TechnologyDetectionAdapter,
+)
 from .providers.ai import MockAIModelAdapter, OpenAICompatibleAdapter
 from .providers.demo import DemoLeadSourceAdapter, DemoTechnologyDetectionAdapter
+from .providers.messaging import MockEmailAdapter, MockSMSAdapter
 
 _LEAD_SOURCE_ADAPTERS: dict[str, type[LeadSourceAdapter]] = {
     "demo": DemoLeadSourceAdapter,
@@ -23,6 +29,11 @@ _AI_MODEL_ADAPTERS: dict[str, type[AIModelAdapter]] = {
     "cloud_openai": OpenAICompatibleAdapter,
 }
 
+_MESSAGING_ADAPTERS: dict[str, type[MessagingAdapter]] = {
+    "mock_email": MockEmailAdapter,
+    "mock_sms": MockSMSAdapter,
+}
+
 
 def get_lead_source_adapter(source_key: str) -> LeadSourceAdapter | None:
     adapter_class = _LEAD_SOURCE_ADAPTERS.get(source_key)
@@ -36,4 +47,9 @@ def get_technology_detection_adapter(source_key: str) -> TechnologyDetectionAdap
 
 def get_ai_model_adapter(provider_type: str) -> AIModelAdapter | None:
     adapter_class = _AI_MODEL_ADAPTERS.get(provider_type)
+    return adapter_class() if adapter_class else None
+
+
+def get_messaging_adapter(provider_key: str) -> MessagingAdapter | None:
+    adapter_class = _MESSAGING_ADAPTERS.get(provider_key)
     return adapter_class() if adapter_class else None

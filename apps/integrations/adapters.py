@@ -65,7 +65,7 @@ class MessagingAdapter(ProviderAdapter):
     """Sends outbound communication (email, SMS, etc.) through a provider."""
 
     @abstractmethod
-    def send(self, message: dict[str, Any]) -> None:
+    def send(self, message: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
 

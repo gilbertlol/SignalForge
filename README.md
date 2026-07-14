@@ -60,6 +60,8 @@ does not yet contain messaging, a frontend, or AI integration; see
   tracked/revocable sessions, scoped API keys, login throttling, and security audit events.
 - Encrypted AI-provider credentials, OpenAI-compatible and mock adapters, privacy-aware model
   routes, ordered fallback, usage budgets, circuit breaking, schema validation, and invocation logs.
+- Canonical email/SMS conversations, approval-gated outreach, explainable eligibility checks,
+  suppression and consent enforcement, reply classification, sequences, and mock transports.
 
 ## Prerequisites
 
@@ -295,23 +297,10 @@ and never stores a default credential.
 The following are intentionally **not** implemented in this ticket and belong to later Linear
 issues:
 
-- **GOR-236** — Unified inbox, outreach approvals, and compliance controls. No `Conversation`/
-  `Message` model exists — `Opportunity.first_contacted_at` only tracks *that* contact
-  happened, not any communication content, and nothing in the discovery pipeline sends
-  anything — qualified candidates just sit in the review queue.
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
 - **GOR-241** — The guided hunt-profile configuration UI (and any frontend at all — this
-  repository is API-only so far).
-- **GOR-243** — A concrete local/cloud AI model gateway. Only the `AIModelAdapter` interface
-  exists today (`apps/integrations/adapters.py`), with no implementation. Scoring and the
-  hunting criteria engine are both 100% deterministic rule evaluation — no AI path exists to
-  override either, and the natural-language hunt-profile builder GOR-242 calls for isn't
-  built, since it needs this gateway.
-- **GOR-244** — Full authentication, multi-user accounts, workspace membership, and role-based
-  permissions. Today there is only a minimal custom `User` model and a single ensured default
-  `Workspace` with no per-user membership — see
-  [Domain model, evidence, and scoring](#domain-model-evidence-and-scoring).
+  repository currently uses REST endpoints and Django Admin for operational configuration).
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
 - Any real (non-demo) lead-source, enrichment, or messaging provider — `EmailVerificationAdapter`

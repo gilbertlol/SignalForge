@@ -44,6 +44,7 @@ LOCAL_APPS = [
     "apps.scoring",
     "apps.hunting",
     "apps.discovery",
+    "apps.communications",
     "apps.tasks",
     "apps.audit",
     "apps.integrations",
