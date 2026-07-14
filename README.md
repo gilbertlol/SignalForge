@@ -10,7 +10,8 @@ This repository implements **GOR-233 — Bootstrap the local-first Django platfo
 **GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**,
 **GOR-242 — Build reusable hunt profiles and opportunity criteria engine**, and
 **GOR-235 — Build lead discovery, enrichment, and daily hunting runs**, plus the backend
-security foundation for **GOR-244 — secure accounts, workspaces, and role isolation**: the technical
+security foundation for **GOR-244 — secure accounts, workspaces, and role isolation**, and the
+backend foundation for **GOR-243 — local and cloud AI model gateway**: the technical
 foundation, the core revenue-domain model with a deterministic scoring engine, a versioned
 criteria engine for defining what SignalForge should hunt for, and a resumable pipeline that
 actually discovers, deduplicates, enriches, and scores candidates end to end. It intentionally
@@ -57,6 +58,8 @@ does not yet contain messaging, a frontend, or AI integration; see
 - Automated tests (pytest + pytest-django + factory_boy), Ruff, mypy, and pre-commit.
 - Workspace memberships, built-in roles with granular overrides, invitations,
   tracked/revocable sessions, scoped API keys, login throttling, and security audit events.
+- Encrypted AI-provider credentials, OpenAI-compatible and mock adapters, privacy-aware model
+  routes, ordered fallback, usage budgets, circuit breaking, schema validation, and invocation logs.
 
 ## Prerequisites
 

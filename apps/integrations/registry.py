@@ -5,7 +5,8 @@ names — it asks the registry for "the lead source adapter for 'demo'"
 instead of importing a concrete class directly.
 """
 
-from .adapters import LeadSourceAdapter, TechnologyDetectionAdapter
+from .adapters import AIModelAdapter, LeadSourceAdapter, TechnologyDetectionAdapter
+from .providers.ai import MockAIModelAdapter, OpenAICompatibleAdapter
 from .providers.demo import DemoLeadSourceAdapter, DemoTechnologyDetectionAdapter
 
 _LEAD_SOURCE_ADAPTERS: dict[str, type[LeadSourceAdapter]] = {
@@ -16,6 +17,12 @@ _TECHNOLOGY_DETECTION_ADAPTERS: dict[str, type[TechnologyDetectionAdapter]] = {
     "demo": DemoTechnologyDetectionAdapter,
 }
 
+_AI_MODEL_ADAPTERS: dict[str, type[AIModelAdapter]] = {
+    "mock": MockAIModelAdapter,
+    "local_openai": OpenAICompatibleAdapter,
+    "cloud_openai": OpenAICompatibleAdapter,
+}
+
 
 def get_lead_source_adapter(source_key: str) -> LeadSourceAdapter | None:
     adapter_class = _LEAD_SOURCE_ADAPTERS.get(source_key)
@@ -24,4 +31,9 @@ def get_lead_source_adapter(source_key: str) -> LeadSourceAdapter | None:
 
 def get_technology_detection_adapter(source_key: str) -> TechnologyDetectionAdapter | None:
     adapter_class = _TECHNOLOGY_DETECTION_ADAPTERS.get(source_key)
+    return adapter_class() if adapter_class else None
+
+
+def get_ai_model_adapter(provider_type: str) -> AIModelAdapter | None:
+    adapter_class = _AI_MODEL_ADAPTERS.get(provider_type)
     return adapter_class() if adapter_class else None

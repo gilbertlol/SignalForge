@@ -12,6 +12,14 @@ from apps.accounts.views import APIKeyViewSet, MembershipViewSet, SessionViewSet
 from apps.contacts.views import ContactViewSet
 from apps.discovery.views import DiscoveryRunViewSet
 from apps.hunting.views import HuntProfileViewSet
+from apps.integrations.views import (
+    AIEndpointViewSet,
+    AIProviderViewSet,
+    CredentialReferenceViewSet,
+    ModelDefinitionViewSet,
+    ModelInvocationViewSet,
+    ModelRouteViewSet,
+)
 from apps.opportunities.views import OpportunityViewSet
 from apps.organizations.views import OrganizationViewSet
 from apps.scoring.views import ScoreSnapshotViewSet
@@ -20,6 +28,12 @@ router = DefaultRouter()
 router.register("memberships", MembershipViewSet, basename="membership")
 router.register("api-keys", APIKeyViewSet, basename="api-key")
 router.register("sessions", SessionViewSet, basename="session")
+router.register("ai/providers", AIProviderViewSet, basename="ai-provider")
+router.register("ai/credentials", CredentialReferenceViewSet, basename="ai-credential")
+router.register("ai/endpoints", AIEndpointViewSet, basename="ai-endpoint")
+router.register("ai/models", ModelDefinitionViewSet, basename="ai-model")
+router.register("ai/routes", ModelRouteViewSet, basename="ai-route")
+router.register("ai/invocations", ModelInvocationViewSet, basename="ai-invocation")
 router.register("organizations", OrganizationViewSet, basename="organization")
 router.register("contacts", ContactViewSet, basename="contact")
 router.register("opportunities", OpportunityViewSet, basename="opportunity")
