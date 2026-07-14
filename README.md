@@ -9,13 +9,15 @@ first and remaining deployable to a private server later.
 This repository implements **GOR-233 — Bootstrap the local-first Django platform**,
 **GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**,
 **GOR-242 — Build reusable hunt profiles and opportunity criteria engine**, and
-**GOR-235 — Build lead discovery, enrichment, and daily hunting runs**, plus the backend
+**GOR-235 — Build lead discovery, enrichment, and daily hunting runs**, **GOR-236 — unified
+inbox, outreach approvals, and compliance controls**, plus the backend
 security foundation for **GOR-244 — secure accounts, workspaces, and role isolation**, and the
-backend foundation for **GOR-243 — local and cloud AI model gateway**: the technical
+backend foundation for **GOR-243 — local and cloud AI model gateway**, and **GOR-245 —
+operational bootstrap and readiness hardening**: the technical
 foundation, the core revenue-domain model with a deterministic scoring engine, a versioned
 criteria engine for defining what SignalForge should hunt for, and a resumable pipeline that
 actually discovers, deduplicates, enriches, and scores candidates end to end. It intentionally
-does not yet contain messaging, a frontend, or AI integration; see
+does not yet contain a command-center frontend or real external providers; see
 [Deferred work](#deferred-work) below.
 
 ## Current implemented scope
@@ -89,17 +91,17 @@ python -c "from django.core.management.utils import get_random_secret_key; print
 ```bash
 make setup
 make up
-make migrate
-make ensure-workspace
-docker compose run --rm web python manage.py bootstrap_owner
+make initialize
 ```
 
-`setup` copies `.env.example` to `.env` (if missing) and builds images. `up` starts db, redis,
-web, worker, and beat in the background. `migrate` applies database migrations.
-`ensure-workspace` idempotently creates the single default Workspace the API operates against
-(see below) — run it once after the first `migrate`. Optionally follow with `make seed-examples`
-to create four example Hunt Profiles (see
-[Hunt profiles and the criteria engine](#hunt-profiles-and-the-criteria-engine)).
+`setup` copies `.env.example` to `.env` (if missing) and builds images. `up` starts db, Redis,
+web, worker, and Beat. `initialize` applies migrations, ensures the default workspace and role
+catalog, attaches existing active superusers as owners (or provisions the explicit environment
+owner), seeds example Hunt Profiles idempotently, and runs the operational readiness check.
+
+Use `make operational-check` at any time to verify database and Redis connectivity, migration
+state, workspace ownership, example/configured hunt profiles, and explicit credential-key
+configuration without printing secrets. Warnings are actionable but do not fail local readiness.
 
 The API is then reachable at `http://localhost:8000`. PostgreSQL and Redis are **not**
 published to the host by default — reach them via `make dbshell` or `docker compose exec`.
@@ -283,7 +285,9 @@ Redis → worker wiring; it has no business meaning.
 ## Creating the first local owner account
 
 There is no seeded administrator account or default password anywhere in this repository.
-Create your own local account interactively:
+For a fresh installation, set `SIGNALFORGE_OWNER_EMAIL` and `SIGNALFORGE_OWNER_PASSWORD` in
+`.env`; `make initialize` provisions that owner without shipping a default password. Alternatively,
+create a superuser interactively before running `make initialize`:
 
 ```bash
 make superuser
