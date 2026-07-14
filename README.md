@@ -7,11 +7,13 @@ and tasks, and coordinate human and AI operators — all while running on a deve
 first and remaining deployable to a private server later.
 
 This repository implements **GOR-233 — Bootstrap the local-first Django platform**,
-**GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**, and
-**GOR-242 — Build reusable hunt profiles and opportunity criteria engine**: the technical
-foundation, the core revenue-domain model with a deterministic scoring engine, and a
-versioned, dry-run-able criteria engine for defining what SignalForge should hunt for. It
-intentionally does not yet contain messaging, live lead discovery, or AI integration; see
+**GOR-234 — Model organizations, contacts, opportunities, evidence, and scoring**,
+**GOR-242 — Build reusable hunt profiles and opportunity criteria engine**, and
+**GOR-235 — Build lead discovery, enrichment, and daily hunting runs**: the technical
+foundation, the core revenue-domain model with a deterministic scoring engine, a versioned
+criteria engine for defining what SignalForge should hunt for, and a resumable pipeline that
+actually discovers, deduplicates, enriches, and scores candidates end to end. It intentionally
+does not yet contain messaging, a frontend, or AI integration; see
 [Deferred work](#deferred-work) below.
 
 ## Current implemented scope
@@ -19,7 +21,8 @@ intentionally does not yet contain messaging, live lead discovery, or AI integra
 - Django + Django REST Framework project (`config/`) with environment-based settings
   (`local`, `test`, `production`) that share one `base.py`.
 - A modular-monolith layout under `apps/`: `core`, `accounts`, `organizations`, `contacts`,
-  `opportunities`, `evidence`, `scoring`, `hunting`, `tasks`, `audit`, `integrations`.
+  `opportunities`, `evidence`, `scoring`, `hunting`, `discovery`, `tasks`, `audit`,
+  `integrations`.
 - A custom user model (`apps.accounts.User`) so the project never depends on Django's
   built-in `auth.User`.
 - A `Workspace` model and `WorkspaceScopedModel` abstract base (`apps.core`) so business
@@ -39,6 +42,10 @@ intentionally does not yet contain messaging, live lead discovery, or AI integra
   criteria tree, a dry-run mode that evaluates a profile against real local Organizations, and
   a create/clone/activate/pause/archive lifecycle — see
   [Hunt profiles and the criteria engine](#hunt-profiles-and-the-criteria-engine).
+- **Discovery** (`apps.discovery`): a resumable discover → normalize → deduplicate → enrich →
+  collect evidence → score pipeline, a demo lead-source provider proving the whole path works
+  end to end, manual entry, CSV import, and daily scheduled runs — see
+  [Lead discovery, enrichment, and scheduled runs](#lead-discovery-enrichment-and-scheduled-runs).
 - A minimal `AuditLogEntry` model and `record()` service (`apps.audit`) — a base for future
   auditing, not the complete audit system.
 - A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for future lead sources,
@@ -195,10 +202,11 @@ Redis → worker wiring; it has no business meaning.
   version's `ResultThreshold.min_total_score`.
 - **Dry-run** (`POST /api/v1/hunt-profiles/{id}/dry-run/`) evaluates the criteria tree against
   real local Organizations (all of them by default, or a specific `organization_ids` list) —
-  this is what makes dry-run meaningful today without GOR-235's discovery providers: it's the
-  exact same evaluation engine a live run would use. Results include matched/failed criteria
-  with reasons, total weight, evidence count, the latest `score_confidence` snapshot when one
-  exists, and a `recommended_next_action` (`review_queue` / `excluded` / `below_threshold`).
+  the same evaluation function (`apps.hunting.services.evaluate_candidate`) a live discovery
+  run's score phase calls per candidate (see the next section), so dry-run and a real run
+  agree by construction. Results include matched/failed criteria with reasons, total weight,
+  evidence count, the latest `score_confidence` snapshot when one exists, and a
+  `recommended_next_action` (`review_queue` / `excluded` / `below_threshold`).
 - **Lifecycle**: `activate`, `pause`, `archive`, and `clone` actions on
   `/api/v1/hunt-profiles/{id}/...`. Cloning copies the current version's entire tree into a
   new draft profile's version 1.
@@ -207,9 +215,48 @@ Redis → worker wiring; it has no business meaning.
   safe to run repeatedly, and doubles as a working example of the version-creation payload
   shape (`apps/hunting/management/commands/seed_hunt_profile_examples.py`).
 - **Not built** (see [Deferred work](#deferred-work)): the natural-language AI-assisted
-  profile builder (GOR-243), a guided configuration UI (GOR-241), and an "execute" endpoint
-  that would trigger a live discovery run (GOR-235) — dry-run against local data is the real,
-  working substitute for the last one today.
+  profile builder (GOR-243) and a guided configuration UI (GOR-241).
+
+## Lead discovery, enrichment, and scheduled runs
+
+- **The pipeline** (`apps.discovery.services.execute_run`) runs six phases against a specific
+  `HuntProfileVersion` in order: discover → normalize → deduplicate → enrich → collect evidence
+  → score. It's one resumable orchestrating task, not a multi-task Celery chain — idempotency
+  comes from each phase only touching `SourceRecord`s still at that phase's entry status, so
+  calling it again on an already-completed (or partially-completed) run just finds nothing left
+  to do in the phases that already finished. `POST /api/v1/discovery-runs/` starts one (against
+  a `hunt_profile`'s current version) and runs it via Celery immediately.
+- **Providers are looked up by key, never hard-coded** — `apps.integrations.registry` resolves
+  a `source_key` string (e.g. `"demo"`) to a concrete adapter. `apps.integrations.providers.demo`
+  ships one working `LeadSourceAdapter` and one `TechnologyDetectionAdapter` so the whole
+  pipeline is exercisable without any real credentials; `SourcePolicy.source_key` (from
+  GOR-242) is what a `HuntProfileVersion` uses to configure which sources run, with
+  `max_records`/`budget_cents` enforced per source. A version with no `SourcePolicy` rows at
+  all falls back to the demo source; a version with an explicit
+  `[{"source_key": "demo", "is_enabled": false}]` runs no automatic discovery at all
+  (manual entry / CSV import only) — that distinction is deliberate, not an oversight.
+- **Partial failure is isolated per provider**: each source's `search()` call is wrapped so one
+  provider raising doesn't touch another's results — the run ends `partial` (some
+  `ProviderResult`s failed, at least one succeeded) rather than `failed` (all of them did).
+- **Deduplication reuses GOR-234's existing service** (`find_or_create_by_domain`) rather than
+  reinventing one — re-running the same source, even from a brand-new `DiscoveryRun`, resolves
+  to the same Organizations. `SuppressionEntry` (a domain blocklist, deactivate rather than
+  delete to explicitly allow rediscovery again) is checked first and blocks org creation.
+- **Manual entry and CSV import**: `POST /api/v1/discovery-runs/{id}/source-records/manual/`
+  and `POST .../source-records/import-csv/` (multipart) both feed the same pipeline from
+  `normalize`/`deduplicate` onward — they're just different ways candidates enter it.
+- **The review queue is just a filter**: `.../source-records/` with `?status=qualified` —
+  nothing in this project sends messages or contacts anyone automatically (GOR-236 doesn't
+  exist yet), so "produce a review queue rather than contacting prospects automatically" is
+  true by construction, not by a safeguard that could be bypassed.
+- **Scheduled runs**: one static hourly Celery Beat entry
+  (`discovery.dispatch_scheduled_discoveries`) queries `SchedulePolicy(frequency="daily",
+  is_enabled=True)` for active profiles that haven't had a scheduled run yet today — not
+  `django-celery-beat`'s dynamic per-profile scheduling, which would be a new dependency for
+  what one query already does.
+- **Not built** (see [Deferred work](#deferred-work)): real (non-demo) provider adapters, a
+  generic rate-limiter (the demo adapter needs none), and hard Celery-level task cancellation
+  (`cancel` is cooperative — checked between phases, not a kill signal).
 
 ## Configuration
 
@@ -241,14 +288,10 @@ and never stores a default credential.
 The following are intentionally **not** implemented in this ticket and belong to later Linear
 issues:
 
-- **GOR-235** — Lead discovery, enrichment providers, and scheduled hunting runs.
-  `apps.hunting` models `SearchScope`/`SourcePolicy`/`SchedulePolicy` as config for this, and
-  `dry_run` runs the real evaluation engine against local data, but there is no provider
-  integration or actual scheduled/triggered execution yet — `SchedulePolicy.is_enabled` isn't
-  wired to Celery Beat, since there's no discovery task to schedule.
 - **GOR-236** — Unified inbox, outreach approvals, and compliance controls. No `Conversation`/
   `Message` model exists — `Opportunity.first_contacted_at` only tracks *that* contact
-  happened, not any communication content.
+  happened, not any communication content, and nothing in the discovery pipeline sends
+  anything — qualified candidates just sit in the review queue.
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
 - **GOR-241** — The guided hunt-profile configuration UI (and any frontend at all — this
@@ -264,8 +307,10 @@ issues:
   [Domain model, evidence, and scoring](#domain-model-evidence-and-scoring).
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
-- Any real lead-source or messaging provider integration — `apps.integrations.adapters` only
-  defines the seam (`LeadSourceAdapter`, `MessagingAdapter`), not an implementation.
+- Any real (non-demo) lead-source, enrichment, or messaging provider — `EmailVerificationAdapter`
+  and `WebsiteAnalysisAdapter` are interfaces only (no implementation, demo or otherwise);
+  `LeadSourceAdapter` and `TechnologyDetectionAdapter` each have one demo implementation
+  proving the seam, not a real one.
 - A production deployment target (reverse proxy, TLS termination, process manager beyond
   `gunicorn`/`celery`) beyond what `config/settings/production.py` and
   `requirements/production.txt` already prepare.

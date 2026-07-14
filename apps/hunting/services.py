@@ -296,7 +296,9 @@ def serialize_result_threshold(version: HuntProfileVersion) -> dict[str, Any] | 
 
 
 def ensure_schedule_policy(profile: HuntProfile, **fields: Any) -> SchedulePolicy:
-    policy, _ = SchedulePolicy.objects.get_or_create(profile=profile, defaults=fields)
+    policy, _ = SchedulePolicy.objects.get_or_create(
+        profile=profile, defaults={"workspace": profile.workspace, **fields}
+    )
     return policy
 
 
@@ -318,57 +320,59 @@ def dry_run(
         if organizations is not None
         else list(Organization.objects.filter(workspace=version.profile.workspace))
     )
+    return [evaluate_candidate(version, org) for org in candidates]
+
+
+def evaluate_candidate(version: HuntProfileVersion, organization: Model) -> dict[str, Any]:
+    """Evaluate a single subject (an Organization, typically) against `version`.
+
+    Shared by `dry_run` (loops this over local Organizations) and
+    `apps.discovery`'s score phase (calls this once per newly discovered
+    candidate) — the same evaluation logic either way.
+    """
     threshold = getattr(version, "result_threshold", None)
     exclusion_rules = list(version.exclusion_rules.all())
 
-    results = []
-    for org in candidates:
-        evidence_context = build_evidence_context(org)
-        matched, components, required_ok, disqualified_by_tree = _evaluate_group(
-            version.root_group, org, evidence_context
-        )
-        excluded, exclusion_reason = _check_exclusions(exclusion_rules, org, evidence_context)
-        total_weight = sum(
-            c["weight"] for c in components if c["matched"] and not c["is_hard_disqualifier"]
-        )
-        hard_disqualified = disqualified_by_tree or excluded
+    evidence_context = build_evidence_context(organization)
+    matched, components, required_ok, disqualified_by_tree = _evaluate_group(
+        version.root_group, organization, evidence_context
+    )
+    excluded, exclusion_reason = _check_exclusions(exclusion_rules, organization, evidence_context)
+    total_weight = sum(
+        c["weight"] for c in components if c["matched"] and not c["is_hard_disqualifier"]
+    )
+    hard_disqualified = disqualified_by_tree or excluded
 
-        confidence_snapshot = latest_snapshot(org, "score_confidence")
-        confidence_value = confidence_snapshot.value if confidence_snapshot else None
-        meets_confidence = (
-            threshold is None
-            or threshold.min_evidence_confidence is None
-            or (
-                confidence_value is not None
-                and confidence_value >= threshold.min_evidence_confidence
-            )
-        )
+    confidence_snapshot = latest_snapshot(organization, "score_confidence")
+    confidence_value = confidence_snapshot.value if confidence_snapshot else None
+    meets_confidence = (
+        threshold is None
+        or threshold.min_evidence_confidence is None
+        or (confidence_value is not None and confidence_value >= threshold.min_evidence_confidence)
+    )
 
-        is_match = matched and required_ok and not hard_disqualified
-        meets_score = threshold is None or total_weight >= threshold.min_total_score
+    is_match = matched and required_ok and not hard_disqualified
+    meets_score = threshold is None or total_weight >= threshold.min_total_score
 
-        if hard_disqualified:
-            recommended_next_action = "excluded"
-        elif is_match and meets_score and meets_confidence:
-            recommended_next_action = "review_queue"
-        else:
-            recommended_next_action = "below_threshold"
+    if hard_disqualified:
+        recommended_next_action = "excluded"
+    elif is_match and meets_score and meets_confidence:
+        recommended_next_action = "review_queue"
+    else:
+        recommended_next_action = "below_threshold"
 
-        results.append(
-            {
-                "organization_id": str(org.id),
-                "organization_name": org.name,
-                "matched": is_match,
-                "excluded": hard_disqualified,
-                "exclusion_reason": exclusion_reason,
-                "total_weight": total_weight,
-                "components": components,
-                "evidence_count": evidence_context["evidence_count"],
-                "score_confidence": confidence_value,
-                "recommended_next_action": recommended_next_action,
-            }
-        )
-    return results
+    return {
+        "organization_id": str(organization.id),  # type: ignore[attr-defined]
+        "organization_name": organization.name,  # type: ignore[attr-defined]
+        "matched": is_match,
+        "excluded": hard_disqualified,
+        "exclusion_reason": exclusion_reason,
+        "total_weight": total_weight,
+        "components": components,
+        "evidence_count": evidence_context["evidence_count"],
+        "score_confidence": confidence_value,
+        "recommended_next_action": recommended_next_action,
+    }
 
 
 def _check_exclusions(

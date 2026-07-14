@@ -43,6 +43,7 @@ LOCAL_APPS = [
     "apps.evidence",
     "apps.scoring",
     "apps.hunting",
+    "apps.discovery",
     "apps.tasks",
     "apps.audit",
     "apps.integrations",
@@ -151,6 +152,12 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TASK_ALWAYS_EAGER = False
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BEAT_SCHEDULE = {
+    "dispatch-scheduled-discoveries": {
+        "task": "discovery.dispatch_scheduled_discoveries",
+        "schedule": 60 * 60,  # hourly; the task itself only starts a run once per day per profile
+    },
+}
 
 # --- Logging ---
 LOGGING = {

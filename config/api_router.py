@@ -9,6 +9,7 @@ this router -> domain apps).
 from rest_framework.routers import DefaultRouter
 
 from apps.contacts.views import ContactViewSet
+from apps.discovery.views import DiscoveryRunViewSet
 from apps.hunting.views import HuntProfileViewSet
 from apps.opportunities.views import OpportunityViewSet
 from apps.organizations.views import OrganizationViewSet
@@ -20,5 +21,6 @@ router.register("contacts", ContactViewSet, basename="contact")
 router.register("opportunities", OpportunityViewSet, basename="opportunity")
 router.register("scores", ScoreSnapshotViewSet, basename="scoresnapshot")
 router.register("hunt-profiles", HuntProfileViewSet, basename="huntprofile")
+router.register("discovery-runs", DiscoveryRunViewSet, basename="discoveryrun")
 
 urlpatterns = router.urls

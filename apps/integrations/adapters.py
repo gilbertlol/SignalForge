@@ -29,6 +29,38 @@ class LeadSourceAdapter(ProviderAdapter):
         raise NotImplementedError
 
 
+class EnrichmentAdapter(ProviderAdapter):
+    """Adds normalized fields to an already-discovered record."""
+
+    @abstractmethod
+    def enrich(self, record: dict[str, Any]) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class EmailVerificationAdapter(ProviderAdapter):
+    """Checks deliverability/risk for an email address."""
+
+    @abstractmethod
+    def verify(self, email: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class TechnologyDetectionAdapter(ProviderAdapter):
+    """Detects technologies/tools a domain appears to use."""
+
+    @abstractmethod
+    def detect(self, domain: str) -> list[str]:
+        raise NotImplementedError
+
+
+class WebsiteAnalysisAdapter(ProviderAdapter):
+    """Extracts signals (content, structure, indicators) from a website."""
+
+    @abstractmethod
+    def analyze(self, url: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+
 class MessagingAdapter(ProviderAdapter):
     """Sends outbound communication (email, SMS, etc.) through a provider."""
 

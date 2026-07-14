@@ -5,13 +5,15 @@ from django.core.exceptions import ValidationError
 
 from apps.evidence.models import Reliability, SourceType
 from apps.evidence.services import record_evidence
-from apps.hunting.models import HuntProfileStatus
+from apps.hunting.models import HuntProfileStatus, ScheduleFrequency
 from apps.hunting.services import (
     activate_version,
     archive,
     clone_profile,
     create_version,
     dry_run,
+    ensure_schedule_policy,
+    evaluate_candidate,
     pause,
     serialize_criteria_tree,
     validate_criteria_tree,
@@ -167,7 +169,31 @@ def test_clone_profile_requires_a_current_version():
         clone_profile(profile, name="Clone")
 
 
+def test_ensure_schedule_policy_creates_once_and_reuses():
+    profile = HuntProfileFactory()
+
+    policy = ensure_schedule_policy(profile, frequency=ScheduleFrequency.DAILY, is_enabled=True)
+    assert policy.workspace_id == profile.workspace_id
+    assert policy.frequency == ScheduleFrequency.DAILY
+
+    same_policy = ensure_schedule_policy(profile, frequency=ScheduleFrequency.WEEKLY)
+    assert same_policy.id == policy.id
+    assert same_policy.frequency == ScheduleFrequency.DAILY  # get_or_create: unchanged on reuse
+
+
 # --- dry-run ---------------------------------------------------------------
+
+
+def test_evaluate_candidate_matches_dry_run_for_a_single_organization():
+    profile = HuntProfileFactory()
+    org = OrganizationFactory(workspace=profile.workspace, domain="acme.com", name="Acme")
+    version = create_version(profile, criteria=_group("AND", [_leaf("domain", "neq", "")]))
+
+    direct = evaluate_candidate(version, org)
+    [via_dry_run] = dry_run(version, organizations=[org])
+
+    assert direct == via_dry_run
+    assert direct["matched"] is True
 
 
 def test_dry_run_and_requires_all_children_to_match():
