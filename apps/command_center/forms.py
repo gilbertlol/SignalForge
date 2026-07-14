@@ -1,6 +1,7 @@
 from django import forms
 
 from apps.hunting.models import HuntProfileStatus
+from apps.integrations.models import PrivacyClass, ProviderType
 from apps.opportunities.models import OpportunityStatus
 
 
@@ -25,3 +26,32 @@ class ProfileActionForm(forms.Form):
 
 class OpportunityStatusForm(forms.Form):
     status = forms.ChoiceField(choices=OpportunityStatus.choices)
+
+
+class AIProviderForm(forms.Form):
+    name = forms.CharField(max_length=255)
+    provider_key = forms.SlugField(max_length=100)
+    provider_type = forms.ChoiceField(choices=ProviderType.choices)
+
+
+class CredentialForm(forms.Form):
+    name = forms.CharField(max_length=255)
+    secret = forms.CharField(widget=forms.PasswordInput(render_value=False))
+
+
+class AIEndpointForm(forms.Form):
+    provider = forms.UUIDField()
+    name = forms.CharField(max_length=255)
+    base_url = forms.URLField(required=False, assume_scheme="http")
+    credential = forms.UUIDField(required=False)
+    timeout_seconds = forms.IntegerField(min_value=1, max_value=300, initial=30)
+    privacy_class = forms.ChoiceField(choices=PrivacyClass.choices)
+
+
+class AIModelForm(forms.Form):
+    endpoint = forms.UUIDField()
+    model_name = forms.CharField(max_length=255)
+    display_name = forms.CharField(max_length=255)
+    context_limit = forms.IntegerField(min_value=1, initial=8192)
+    input_cost_per_million = forms.DecimalField(min_value=0, initial=0)
+    output_cost_per_million = forms.DecimalField(min_value=0, initial=0)

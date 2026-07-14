@@ -1,12 +1,19 @@
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.urls import reverse
 
 from apps.accounts.models import AccessPermission
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Workspace
 from apps.hunting.models import HuntProfile
+from apps.integrations.models import (
+    AIEndpoint,
+    AIProvider,
+    CredentialReference,
+    ProviderHealthCheck,
+)
 from apps.opportunities.tests.factories import OpportunityFactory
 from apps.organizations.tests.factories import OrganizationFactory
 
@@ -122,3 +129,83 @@ def test_pipeline_status_transition_is_workspace_scoped(client):
     opportunity.refresh_from_db()
     assert response.status_code == 302
     assert opportunity.status == "qualified"
+
+
+def grant_provider_management(user):
+    permission, _ = AccessPermission.objects.get_or_create(
+        key="providers.manage", defaults={"name": "Manage providers"}
+    )
+    user.memberships.get().permission_grants.add(permission)
+
+
+@override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")
+def test_provider_workspace_encrypts_and_never_renders_secret(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:create-credential"),
+        {"name": "Cloud API", "secret": "never-render-this-secret"},
+        follow=True,
+    )
+
+    credential = CredentialReference.objects.get(name="Cloud API")
+    assert response.status_code == 200
+    assert "never-render-this-secret" not in response.content.decode()
+    assert "never-render-this-secret" not in credential.encrypted_value
+    assert credential.get_secret() == "never-render-this-secret"
+
+
+def test_endpoint_creation_rejects_cross_workspace_provider(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    other_workspace = Workspace.objects.create(name="Foreign AI", slug="foreign-ai")
+    provider = AIProvider.objects.create(
+        workspace=other_workspace,
+        name="Foreign",
+        provider_key="foreign",
+        provider_type="mock",
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:create-endpoint"),
+        {
+            "provider": provider.id,
+            "name": "Cross workspace",
+            "timeout_seconds": 30,
+            "privacy_class": "local_only",
+        },
+    )
+
+    assert response.status_code == 404
+    assert not AIEndpoint.objects.filter(name="Cross workspace").exists()
+
+
+def test_mock_provider_connection_test_is_sanitized(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    provider = AIProvider.objects.create(
+        workspace=workspace,
+        name="Mock local",
+        provider_key="mock-local",
+        provider_type="mock",
+    )
+    AIEndpoint.objects.create(
+        workspace=workspace,
+        provider=provider,
+        name="Mock endpoint",
+        privacy_class="local_only",
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:test-provider", kwargs={"pk": provider.pk}), follow=True
+    )
+
+    check = ProviderHealthCheck.objects.get(provider=provider)
+    assert response.status_code == 200
+    assert check.was_successful is True
+    assert b"connection passed" in response.content

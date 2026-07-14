@@ -27,10 +27,20 @@ from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
 from apps.hunting.models import HuntProfile, HuntProfileStatus
 from apps.hunting.services import activate_version, archive, create_version, pause
+from apps.integrations.models import AIEndpoint, AIProvider, CredentialReference, ModelDefinition
+from apps.integrations.services import check_provider
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
 
-from .forms import HuntProfileForm, OpportunityStatusForm, ProfileActionForm
+from .forms import (
+    AIEndpointForm,
+    AIModelForm,
+    AIProviderForm,
+    CredentialForm,
+    HuntProfileForm,
+    OpportunityStatusForm,
+    ProfileActionForm,
+)
 
 
 def workspace_permission(key: str):
@@ -223,6 +233,122 @@ def opportunity_status(request: HttpRequest, pk) -> HttpResponse:
             request, f"{opportunity.title} moved to {opportunity.get_status_display()}."
         )
     return redirect("command_center:pipeline")
+
+
+@workspace_permission("providers.manage")
+def provider_settings(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    providers = AIProvider.objects.filter(workspace=workspace).prefetch_related("endpoints__models")
+    return _render(
+        request,
+        "command_center/provider_settings.html",
+        {
+            "providers": providers,
+            "credentials": CredentialReference.objects.filter(workspace=workspace),
+            "provider_form": AIProviderForm(),
+            "credential_form": CredentialForm(),
+            "endpoint_form": AIEndpointForm(),
+            "model_form": AIModelForm(),
+        },
+    )
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def create_provider(request: HttpRequest) -> HttpResponse:
+    form = AIProviderForm(request.POST)
+    if form.is_valid():
+        AIProvider.objects.create(workspace=get_request_workspace(request), **form.cleaned_data)
+        messages.success(request, "AI provider created.")
+    else:
+        messages.error(request, "Provider configuration is invalid.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def create_credential(request: HttpRequest) -> HttpResponse:
+    form = CredentialForm(request.POST)
+    if form.is_valid():
+        credential = CredentialReference(
+            workspace=get_request_workspace(request), name=form.cleaned_data["name"]
+        )
+        credential.set_secret(form.cleaned_data["secret"])
+        credential.save()
+        messages.success(request, "Credential encrypted and stored.")
+    else:
+        messages.error(request, "Credential configuration is invalid.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def create_endpoint(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = AIEndpointForm(request.POST)
+    if form.is_valid():
+        provider = get_object_or_404(
+            AIProvider, workspace=workspace, pk=form.cleaned_data["provider"]
+        )
+        credential = None
+        if form.cleaned_data["credential"]:
+            credential = get_object_or_404(
+                CredentialReference,
+                workspace=workspace,
+                pk=form.cleaned_data["credential"],
+            )
+        AIEndpoint.objects.create(
+            workspace=workspace,
+            provider=provider,
+            credential=credential,
+            name=form.cleaned_data["name"],
+            base_url=form.cleaned_data["base_url"],
+            timeout_seconds=form.cleaned_data["timeout_seconds"],
+            privacy_class=form.cleaned_data["privacy_class"],
+        )
+        messages.success(request, "AI endpoint created.")
+    else:
+        messages.error(request, "Endpoint configuration is invalid.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def create_model(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = AIModelForm(request.POST)
+    if form.is_valid():
+        endpoint = get_object_or_404(
+            AIEndpoint, workspace=workspace, pk=form.cleaned_data["endpoint"]
+        )
+        ModelDefinition.objects.create(
+            workspace=workspace,
+            endpoint=endpoint,
+            model_name=form.cleaned_data["model_name"],
+            display_name=form.cleaned_data["display_name"],
+            context_limit=form.cleaned_data["context_limit"],
+            input_cost_per_million=form.cleaned_data["input_cost_per_million"],
+            output_cost_per_million=form.cleaned_data["output_cost_per_million"],
+        )
+        messages.success(request, "Model definition created.")
+    else:
+        messages.error(request, "Model configuration is invalid.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def test_provider_connection(request: HttpRequest, pk) -> HttpResponse:
+    provider = get_object_or_404(AIProvider, workspace=get_request_workspace(request), pk=pk)
+    result = check_provider(provider)
+    if result.was_successful:
+        messages.success(request, f"{provider.name} connection passed ({result.latency_ms} ms).")
+    else:
+        messages.error(
+            request,
+            f"{provider.name} connection failed: {result.sanitized_error or 'unavailable'}.",
+        )
+    return redirect("command_center:provider-settings")
 
 
 @workspace_permission("prospects.access")

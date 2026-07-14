@@ -7,6 +7,7 @@
     <title>{% block title %}Command Center{% endblock %} · SignalForge</title>
     <link rel="stylesheet" href="{% static 'command_center/app.css' %}">
     <link rel="stylesheet" href="{% static 'command_center/workspaces.css' %}">
+    <link rel="stylesheet" href="{% static 'command_center/settings.css' %}">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -31,7 +32,7 @@
           <a href="{% url 'command_center:runs' %}">System runs</a>
         {% endif %}
         {% if nav.communications %}<a href="{% url 'command_center:inbox' %}">Unified inbox</a>{% endif %}
-        {% if nav.providers %}<a href="/api/v1/ai/providers/">AI providers</a>{% endif %}
+        {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}">AI providers</a>{% endif %}
         {% if nav.users %}<a href="/api/v1/memberships/">Users</a>{% endif %}
       </nav>
       <main id="main" class="content" tabindex="-1">

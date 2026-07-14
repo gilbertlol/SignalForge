@@ -66,7 +66,7 @@ does not yet contain a command-center frontend or real external providers; see
   suppression and consent enforcement, reply classification, sequences, and mock transports.
 - An authenticated, permission-aware command center with daily review, guided Hunt Profile
   creation and run launch, opportunity pipeline, organization, discovery monitoring, inbox
-  approval, and global search workspaces.
+  approval, secure AI provider/credential configuration, connection testing, and global search.
 
 ## Prerequisites
 
@@ -306,7 +306,7 @@ issues:
 
 - **GOR-237** — Work-item / task-assignment models and the human + AI operator execution
   system (the `tasks` app is currently an empty skeleton).
-- **GOR-241 remaining workspaces** — advanced criteria/provider configuration, team/agent
+- **GOR-241 remaining workspaces** — advanced visual criteria/routing configuration, team/agent
   operations, finance, risk, notifications, saved views, and browser-level end-to-end coverage.
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
