@@ -188,6 +188,42 @@
 .field-pair { grid-template-columns: 1fr 1fr; }
 .field-trio { grid-template-columns: repeat(3, 1fr); }
 
+.location-builder {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.6fr) minmax(260px, 1.4fr);
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.radius-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.field-control {
+  min-width: 0;
+}
+
+.field-control label,
+.field-control small {
+  display: block;
+}
+
+.field-control small {
+  color: var(--muted);
+  margin-top: 5px;
+}
+
+.field-control input,
+.field-control select {
+  width: 100%;
+}
+
+[hidden] { display: none !important; }
+
 .builder-disclosure {
   border-top: 1px solid var(--line);
 }
@@ -236,6 +272,8 @@
 
   .field-pair,
   .field-trio,
+  .location-builder,
+  .radius-fields,
   .hunt-builder-panel .settings-grid,
   .preset-browser { grid-template-columns: 1fr; }
 

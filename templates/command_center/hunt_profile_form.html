@@ -31,13 +31,15 @@
     <div class="builder-basics">
       {{ form.name.as_field_group }}
       {{ form.description.as_field_group }}
-      <div class="field-pair">{{ form.geographies.as_field_group }}{{ form.industries.as_field_group }}</div>
+      <div class="location-builder"><div class="field-control">{{ form.location_type.label_tag }}{{ form.location_type }}{{ form.location_type.errors }}</div><div class="field-control location-name">{{ form.geographies.label_tag }}{{ form.geographies }}{% if form.geographies.help_text %}<small>{{ form.geographies.help_text }}</small>{% endif %}{{ form.geographies.errors }}</div></div>
+      <div id="radius-fields" class="radius-fields"><div class="field-control">{{ form.center_latitude.label_tag }}{{ form.center_latitude }}{{ form.center_latitude.errors }}</div><div class="field-control">{{ form.center_longitude.label_tag }}{{ form.center_longitude }}{{ form.center_longitude.errors }}</div><div class="field-control">{{ form.radius_meters.label_tag }}{{ form.radius_meters }}<small>Maximum 50 km.</small>{{ form.radius_meters.errors }}</div></div>
+      {{ form.industries.as_field_group }}
       {{ form.minimum_score.as_field_group }}
     </div>
 
     <details class="builder-disclosure" {% if form.errors %}open{% endif %}>
       <summary><span><strong>Search details</strong><small>Keywords, place type and map radius</small></span></summary>
-      <div class="disclosure-body">{{ form.keyword.as_field_group }}{{ form.included_type.as_field_group }}<div class="field-trio">{{ form.center_latitude.as_field_group }}{{ form.center_longitude.as_field_group }}{{ form.radius_meters.as_field_group }}</div>{{ form.require_domain.as_field_group }}</div>
+      <div class="disclosure-body">{{ form.keyword.as_field_group }}{{ form.included_type.as_field_group }}{{ form.require_domain.as_field_group }}</div>
     </details>
 
     <details class="builder-disclosure" {% if selected_preset %}open{% endif %}>
@@ -53,4 +55,19 @@
     <div class="builder-submit">{{ form.activate_now.as_field_group }}<div class="actions"><a class="button secondary" href="{% url 'command_center:hunt-profiles' %}">Cancel</a><button class="button">Create Hunt Profile</button></div></div>
   </form>
 </section>
+<script>
+  (() => {
+    const mode = document.getElementById("id_location_type");
+    const radius = document.getElementById("radius-fields");
+    const locationName = document.querySelector(".location-name");
+    if (!mode || !radius) return;
+    const sync = () => {
+      const isRadius = mode.value === "radius";
+      radius.hidden = !isRadius;
+      if (locationName) locationName.hidden = isRadius;
+    };
+    mode.addEventListener("change", sync);
+    sync();
+  })();
+</script>
 {% endblock %}

@@ -6,6 +6,7 @@ from django.urls import reverse
 
 from apps.accounts.models import AccessPermission
 from apps.accounts.tests.factories import UserFactory
+from apps.command_center.forms import HuntProfileForm
 from apps.core.models import Workspace
 from apps.discovery.models import (
     DiscoveryRunStatus,
@@ -130,6 +131,26 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert b'class="preset-list"' in response.content
     assert response.content.count(b'class="preset-option') == 5
     assert response.content.count(b'class="preset-preview') == 1
+    assert b'id="id_location_type"' in response.content
+    assert b'id="radius-fields"' in response.content
+
+
+def test_radius_location_requires_google_places_and_complete_coordinates():
+    form = HuntProfileForm(
+        {
+            "name": "Radius hunt",
+            "minimum_score": 10,
+            "location_type": "radius",
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 10,
+            "radius_meters": 5000,
+        }
+    )
+
+    assert form.is_valid() is False
+    assert "use_openstreetmap" in form.errors
+    assert "use_google_places" in form.errors
+    assert "center_latitude" in form.errors
 
 
 def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_profile(client):

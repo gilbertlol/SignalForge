@@ -18,9 +18,21 @@ class HuntProfileForm(forms.Form):
     description = forms.CharField(widget=forms.Textarea, required=False)
     require_domain = forms.BooleanField(required=False, initial=True)
     minimum_score = forms.IntegerField(min_value=0, initial=10)
+    location_type = forms.ChoiceField(
+        choices=[
+            ("city", "City"),
+            ("region", "Region / state / province"),
+            ("country", "Country"),
+            ("radius", "Radius around a point"),
+        ],
+        initial="city",
+        label="Location type",
+        required=False,
+    )
     geographies = forms.CharField(
         required=False,
-        help_text="Comma-separated cities, regions, or countries (required for OpenStreetMap).",
+        label="Location",
+        help_text="For example: Montreal, California, or France.",
     )
     industries = forms.CharField(
         required=False,
@@ -76,15 +88,31 @@ class HuntProfileForm(forms.Form):
             self.add_error("manual_only", "Manual-only profiles cannot enable automatic sources.")
         elif not cleaned.get("manual_only") and not selected:
             raise forms.ValidationError("Select at least one source or choose manual/CSV only.")
-        if cleaned.get("use_openstreetmap") and not cleaned.get("geographies"):
+        location_type = cleaned.get("location_type") or "city"
+        if (
+            cleaned.get("use_openstreetmap")
+            and location_type != "radius"
+            and not cleaned.get("geographies")
+        ):
             self.add_error("geographies", "Add at least one geography for OpenStreetMap.")
+        if location_type == "radius" and cleaned.get("use_openstreetmap"):
+            self.add_error(
+                "use_openstreetmap",
+                "OpenStreetMap does not support radius searches; use Google Places.",
+            )
+        if location_type == "radius" and not cleaned.get("use_google_places"):
+            self.add_error("use_google_places", "Select Google Places for a radius search.")
         coordinates = (cleaned.get("center_latitude"), cleaned.get("center_longitude"))
         if any(value is not None for value in coordinates) and not all(
             value is not None for value in coordinates
         ):
             self.add_error("center_latitude", "Provide both latitude and longitude.")
+        if location_type == "radius" and not all(value is not None for value in coordinates):
+            self.add_error("center_latitude", "A radius search needs latitude and longitude.")
         if cleaned.get("radius_meters") and not all(value is not None for value in coordinates):
             self.add_error("radius_meters", "A radius requires center coordinates.")
+        if location_type == "radius" and not cleaned.get("radius_meters"):
+            self.add_error("radius_meters", "Set the search radius.")
         for key in ("openstreetmap", "apollo", "google_places"):
             if cleaned.get(f"use_{key}") and not cleaned.get(f"{key}_max_records"):
                 self.add_error(f"{key}_max_records", "Set a record limit for this source.")
