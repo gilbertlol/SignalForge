@@ -196,12 +196,73 @@
   margin-bottom: 14px;
 }
 
-.radius-fields {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+.radius-map-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid var(--line-bright);
+  border-radius: 12px;
+  background: rgba(116, 201, 182, 0.035);
   margin-bottom: 14px;
 }
+
+.map-choice-copy {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.map-choice-copy small { display: block; color: var(--muted); margin-top: 3px; }
+.map-choice-icon { color: var(--gold); font-size: 25px; }
+.map-field-errors { flex-basis: 100%; }
+
+.map-dialog {
+  width: min(920px, calc(100vw - 40px));
+  padding: 0;
+  border: 1px solid var(--line-bright);
+  border-radius: 16px;
+  background: #0b1718;
+  color: var(--text);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+.map-dialog::backdrop {
+  background: rgba(1, 7, 8, 0.78);
+  backdrop-filter: blur(5px);
+}
+
+.map-dialog-heading,
+.map-dialog-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+}
+
+.map-dialog-heading h2,
+.map-dialog-heading p { margin: 0; }
+.map-dialog-heading > div > p:last-child { color: var(--muted); margin-top: 5px; }
+.radius-map { height: min(520px, 56vh); background: #102122; }
+
+.map-dialog-controls {
+  border-top: 1px solid var(--line);
+}
+
+.radius-slider {
+  flex: 1;
+  min-width: 220px;
+}
+
+.radius-slider label {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.radius-slider input { width: 100%; }
 
 .field-control {
   min-width: 0;
@@ -273,7 +334,7 @@
   .field-pair,
   .field-trio,
   .location-builder,
-  .radius-fields,
+  .radius-map-control,
   .hunt-builder-panel .settings-grid,
   .preset-browser { grid-template-columns: 1fr; }
 
@@ -289,4 +350,7 @@
   .builder-intro,
   .builder-submit,
   .preset-picker-heading { align-items: flex-start; flex-direction: column; }
+
+  .map-dialog-controls { align-items: stretch; flex-direction: column; }
+  .map-dialog-controls .actions { width: 100%; }
 }

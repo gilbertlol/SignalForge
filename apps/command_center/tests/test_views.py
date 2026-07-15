@@ -133,6 +133,9 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert response.content.count(b'class="preset-preview') == 1
     assert b'id="id_location_type"' in response.content
     assert b'id="radius-fields"' in response.content
+    assert b'id="radius-map-dialog"' in response.content
+    assert b'id="radius-map"' in response.content
+    assert b'type="hidden" name="center_latitude"' in response.content
 
 
 def test_radius_location_requires_google_places_and_complete_coordinates():
@@ -151,6 +154,23 @@ def test_radius_location_requires_google_places_and_complete_coordinates():
     assert "use_openstreetmap" in form.errors
     assert "use_google_places" in form.errors
     assert "center_latitude" in form.errors
+
+
+def test_map_radius_values_validate_with_google_places():
+    form = HuntProfileForm(
+        {
+            "name": "Mapped radius hunt",
+            "minimum_score": 10,
+            "location_type": "radius",
+            "use_google_places": "on",
+            "google_places_max_records": 20,
+            "center_latitude": "45.501700",
+            "center_longitude": "-73.567300",
+            "radius_meters": 12000,
+        }
+    )
+
+    assert form.is_valid(), form.errors
 
 
 def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_profile(client):
