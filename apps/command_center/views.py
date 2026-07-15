@@ -94,7 +94,9 @@ def _render(request: HttpRequest, template: str, context: dict) -> HttpResponse:
 @workspace_permission("prospects.access")
 def dashboard(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
-    recent_runs = DiscoveryRun.objects.filter(workspace=workspace)[:6]
+    recent_runs = DiscoveryRun.objects.filter(workspace=workspace).select_related(
+        "hunt_profile_version__profile"
+    )[:6]
     return _render(
         request,
         "command_center/dashboard.html",
@@ -120,7 +122,7 @@ def review_queue(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
     records = SourceRecord.objects.filter(
         discovery_run__workspace=workspace, status=SourceRecordStatus.QUALIFIED
-    ).select_related("organization", "discovery_run__hunt_profile_version__hunt_profile")[:100]
+    ).select_related("organization", "discovery_run__hunt_profile_version__profile")[:100]
     return _render(request, "command_center/review_queue.html", {"records": records})
 
 
@@ -406,7 +408,7 @@ def test_provider_connection(request: HttpRequest, pk) -> HttpResponse:
 @workspace_permission("prospects.access")
 def run_monitor(request: HttpRequest) -> HttpResponse:
     runs = DiscoveryRun.objects.filter(workspace=get_request_workspace(request)).select_related(
-        "hunt_profile_version__hunt_profile", "initiated_by"
+        "hunt_profile_version__profile", "initiated_by"
     )[:100]
     return _render(request, "command_center/runs.html", {"runs": runs})
 
