@@ -26,22 +26,25 @@
 }
 
 .preset-list {
-  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  padding: 18px 22px 22px;
 }
 
 .preset-row {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(420px, 1.7fr) auto;
-  gap: 28px;
-  align-items: center;
-  padding: 22px;
-  border-bottom: 1px solid var(--line);
-  transition: background 0.2s, border-color 0.2s;
+  display: block;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(5, 13, 14, 0.3);
+  transition: background 0.2s, border-color 0.2s, transform 0.2s;
 }
 
 .preset-row:hover,
 .preset-row.selected {
   background: rgba(116, 201, 182, 0.035);
+  border-color: var(--line-bright);
 }
 
 .preset-row.selected {
@@ -65,27 +68,31 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+  margin-top: 16px;
 }
 
 .preset-source {
   min-width: 0;
-  padding-left: 14px;
-  border-left: 1px solid var(--line);
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .preset-action {
-  align-self: center;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 @media (max-width: 850px) {
   .settings-grid,
-  .provider-card,
-  .preset-row {
+  .provider-card {
     grid-template-columns: 1fr;
   }
 
-  .preset-row {
-    gap: 18px;
+  .preset-list {
+    padding: 14px;
   }
 
   .preset-action .button {
