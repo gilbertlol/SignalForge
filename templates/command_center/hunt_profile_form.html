@@ -5,25 +5,20 @@
   <div><p class="eyebrow">New expedition</p><h1>What kind of client are we looking for?</h1></div>
 </div>
 
-<section class="preset-picker" aria-labelledby="preset-title">
+<section class="preset-picker panel" aria-labelledby="preset-title">
   <div class="preset-picker-heading">
     <div><h2 id="preset-title">Choose a starting point</h2><p>Pick the closest fit. You can change everything afterward.</p></div>
     <span class="count-pill">{{ presets|length }} paths</span>
   </div>
-  <div class="preset-list">
-    {% for preset in presets %}
-    <article class="preset-row{% if selected_preset.pk == preset.pk %} selected{% endif %}">
-      <div class="preset-summary">
-        <div class="preset-title"><strong>{{ preset.name }}</strong>{% if selected_preset.pk == preset.pk %}<span class="status status-succeeded">Selected</span>{% endif %}</div>
-        <p>{{ preset.description }}</p>
-        <div class="source-chips" aria-label="Recommended sources">
-          {% for source in preset.source_statuses %}<span class="source-chip{% if source.available %} ready{% endif %}">{{ source.source_key }}{% if not source.available %} · setup needed{% endif %}</span>{% endfor %}
-        </div>
-      </div>
-      <div class="preset-action"><a class="button secondary" href="?preset={{ preset.key }}">{% if selected_preset.pk == preset.pk %}Selected{% else %}Choose{% endif %}</a></div>
-      <details class="preset-details"><summary>Source notes</summary><div class="preset-sources">{% for source in preset.source_statuses %}<div class="preset-source"><strong>{{ source.source_key }}</strong><p>{{ source.strengths }}</p>{% if not source.available %}<small>Fallback · {{ source.alternative }}</small>{% endif %}</div>{% endfor %}</div></details>
-    </article>
-    {% endfor %}
+  <div class="preset-browser">
+    <nav class="preset-list" aria-label="Hunt presets">{% for preset in presets %}<a class="preset-option{% if display_preset.pk == preset.pk %} active{% endif %}" href="?preset={{ preset.key }}"><span>{{ preset.name }}</span><small>{{ preset.source_statuses|length }} sources</small></a>{% endfor %}</nav>
+    {% if display_preset %}<article class="preset-preview">
+      <div class="preset-title"><div><p class="eyebrow">Suggested path</p><h3>{{ display_preset.name }}</h3></div>{% if selected_preset.pk == display_preset.pk %}<span class="status status-succeeded">Selected</span>{% endif %}</div>
+      <p class="preset-description">{{ display_preset.description }}</p>
+      <small>Objective · {{ display_preset.configuration.scoring_objective }}</small>
+      <div class="preset-sources">{% for source in display_preset.source_statuses %}<div class="preset-source"><div><strong>{{ source.source_key }}</strong><span class="source-chip{% if source.available %} ready{% endif %}">{% if source.available %}ready{% else %}setup needed{% endif %}</span></div><p>{{ source.strengths }}</p>{% if not source.available %}<small>Fallback · {{ source.alternative }}</small>{% endif %}</div>{% endfor %}</div>
+      {% if selected_preset.pk != display_preset.pk %}<div class="preset-action"><a class="button" href="?preset={{ display_preset.key }}">Use this preset</a></div>{% endif %}
+    </article>{% endif %}
   </div>
 </section>
 

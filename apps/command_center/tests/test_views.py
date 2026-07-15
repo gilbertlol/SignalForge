@@ -128,7 +128,8 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert b"setup needed" in response.content
     assert b"change everything afterward" in response.content
     assert b'class="preset-list"' in response.content
-    assert response.content.count(b'class="preset-row') == 5
+    assert response.content.count(b'class="preset-option') == 5
+    assert response.content.count(b'class="preset-preview') == 1
 
 
 def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_profile(client):

@@ -224,6 +224,14 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                     "available": bool(adapter and adapter.is_configured()),
                 }
             )
+    display_preset = next(
+        (
+            preset
+            for preset in presets
+            if selected_preset and preset.pk == selected_preset.pk
+        ),
+        presets[0] if presets else None,
+    )
     if request.method == "POST" and form.is_valid():
         workspace = get_request_workspace(request)
         profile = HuntProfile.objects.create(
@@ -275,7 +283,12 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
     return _render(
         request,
         "command_center/hunt_profile_form.html",
-        {"form": form, "presets": presets, "selected_preset": selected_preset},
+        {
+            "form": form,
+            "presets": presets,
+            "selected_preset": selected_preset,
+            "display_preset": display_preset,
+        },
     )
 
 
