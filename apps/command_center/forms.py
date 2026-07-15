@@ -13,6 +13,7 @@ from apps.opportunities.models import OpportunityStatus
 
 
 class HuntProfileForm(forms.Form):
+    preset = forms.UUIDField(required=False, widget=forms.HiddenInput)
     name = forms.CharField(max_length=255)
     description = forms.CharField(widget=forms.Textarea, required=False)
     require_domain = forms.BooleanField(required=False, initial=True)
@@ -45,14 +46,21 @@ class HuntProfileForm(forms.Form):
         min_value=1, max_value=100, initial=25, required=False
     )
     openstreetmap_budget_cents = forms.IntegerField(min_value=0, required=False)
+    openstreetmap_reliability_weight = forms.IntegerField(
+        min_value=0, max_value=100, required=False
+    )
     use_apollo = forms.BooleanField(required=False, label="Apollo Organization Search")
     apollo_max_records = forms.IntegerField(min_value=1, max_value=100, initial=10, required=False)
     apollo_budget_cents = forms.IntegerField(min_value=0, required=False)
+    apollo_reliability_weight = forms.IntegerField(min_value=0, max_value=100, required=False)
     use_google_places = forms.BooleanField(required=False, label="Google Places")
     google_places_max_records = forms.IntegerField(
         min_value=1, max_value=60, initial=20, required=False
     )
     google_places_budget_cents = forms.IntegerField(min_value=0, required=False)
+    google_places_reliability_weight = forms.IntegerField(
+        min_value=0, max_value=100, required=False
+    )
     manual_only = forms.BooleanField(required=False, label="Manual/CSV only (no automatic source)")
     reliability_weight = forms.IntegerField(min_value=0, max_value=100, initial=50, required=False)
     timeout_seconds = forms.IntegerField(min_value=5, max_value=300, initial=30, required=False)
@@ -89,7 +97,9 @@ class HuntProfileForm(forms.Form):
                 policy = {
                     "source_key": key,
                     "max_records": self.cleaned_data[f"{key}_max_records"],
-                    "reliability_weight": self.cleaned_data.get("reliability_weight") or 50,
+                    "reliability_weight": self.cleaned_data.get(f"{key}_reliability_weight")
+                    or self.cleaned_data.get("reliability_weight")
+                    or 50,
                     "timeout_seconds": self.cleaned_data.get("timeout_seconds") or 30,
                     "max_retries": 2
                     if self.cleaned_data.get("max_retries") is None

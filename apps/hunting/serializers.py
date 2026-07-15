@@ -20,6 +20,8 @@ class HuntProfileVersionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "version_number",
+            "applied_preset_key",
+            "applied_preset_version",
             "criteria",
             "search_scope",
             "source_policies",

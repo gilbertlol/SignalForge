@@ -16,7 +16,7 @@ from apps.discovery.models import (
 from apps.discovery.services import start_run
 from apps.evidence.models import OrganizationClaim, OrganizationFieldResolution
 from apps.evidence.services import create_manual_claim
-from apps.hunting.models import HuntProfile
+from apps.hunting.models import HuntPreset, HuntProfile
 from apps.hunting.services import create_version
 from apps.integrations.models import (
     AIEndpoint,
@@ -109,6 +109,58 @@ def test_create_hunt_profile_builds_version_and_activates(client):
     assert profile.status == "active"
     assert profile.current_version is not None
     assert profile.current_version.source_policies.get().max_records == 20
+
+
+def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    response = client.get(
+        reverse("command_center:create-hunt-profile") + "?preset=local-businesses"
+    )
+
+    assert response.status_code == 200
+    assert response.context["form"].initial["use_google_places"] is True
+    assert response.context["form"].initial["use_openstreetmap"] is True
+    assert response.context["form"].initial["google_places_budget_cents"] == 25
+    assert response.context["form"].initial["google_places_reliability_weight"] == 80
+    assert b"corporate_registry" in response.content
+    assert b"missing" in response.content
+    assert b"everything remains editable" in response.content
+
+
+def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_profile(client):
+    user = UserFactory()
+    client.force_login(user)
+    preset = HuntPreset.objects.get(key="local-businesses", version=1)
+
+    response = client.post(
+        reverse("command_center:create-hunt-profile"),
+        {
+            "preset": preset.pk,
+            "name": "Editable local hunt",
+            "minimum_score": 17,
+            "geographies": "Montreal",
+            "industries": "dentist",
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 12,
+            "reliability_weight": 73,
+            "activate_now": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    profile = HuntProfile.objects.get(name="Editable local hunt")
+    version = profile.current_version
+    assert version.applied_preset_key == "local-businesses"
+    assert version.applied_preset_version == 1
+    assert version.search_scope.industries == ["dentist"]
+    assert version.source_policies.get().max_records == 12
+    preset.configuration = {"form_initial": {"openstreetmap_max_records": 99}}
+    preset.save(update_fields=["configuration", "updated_at"])
+    version.refresh_from_db()
+    assert version.source_policies.get().max_records == 12
+    assert version.result_threshold.min_total_score == 17
 
 
 @patch("apps.command_center.views.run_discovery_task.delay")

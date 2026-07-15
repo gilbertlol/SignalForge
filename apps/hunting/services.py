@@ -23,6 +23,7 @@ from .models import (
     CriterionOperator,
     ExclusionRule,
     HuntCriterion,
+    HuntPreset,
     HuntProfile,
     HuntProfileStatus,
     HuntProfileVersion,
@@ -105,6 +106,7 @@ def create_version(
     source_policies: list[dict[str, Any]] | None = None,
     exclusion_rules: list[dict[str, Any]] | None = None,
     result_threshold: dict[str, Any] | None = None,
+    applied_preset: HuntPreset | None = None,
 ) -> HuntProfileVersion:
     """Build an entirely new, immutable `HuntProfileVersion` in one transaction.
 
@@ -121,7 +123,11 @@ def create_version(
         or 0
     ) + 1
     version = HuntProfileVersion.objects.create(
-        profile=profile, version_number=next_version_number, root_group=root_group
+        profile=profile,
+        version_number=next_version_number,
+        root_group=root_group,
+        applied_preset_key=applied_preset.key if applied_preset else "",
+        applied_preset_version=applied_preset.version if applied_preset else None,
     )
 
     if search_scope:

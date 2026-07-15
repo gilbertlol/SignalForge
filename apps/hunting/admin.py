@@ -4,6 +4,7 @@ from .models import (
     CriterionGroup,
     ExclusionRule,
     HuntCriterion,
+    HuntPreset,
     HuntProfile,
     HuntProfileVersion,
     KeywordSet,
@@ -13,6 +14,13 @@ from .models import (
     SourcePolicy,
     ValueSignal,
 )
+
+
+@admin.register(HuntPreset)
+class HuntPresetAdmin(admin.ModelAdmin):
+    list_display = ("name", "key", "version", "is_active")
+    list_filter = ("is_active",)
+    readonly_fields = [f.name for f in HuntPreset._meta.fields]
 
 
 @admin.register(HuntProfile)

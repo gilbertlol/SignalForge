@@ -32,7 +32,7 @@ from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
 from apps.evidence.models import OrganizationClaim
 from apps.evidence.services import create_manual_claim, select_organization_claim
-from apps.hunting.models import HuntProfile, HuntProfileStatus
+from apps.hunting.models import HuntPreset, HuntProfile, HuntProfileStatus
 from apps.hunting.services import activate_version, archive, create_version, pause
 from apps.integrations.models import (
     AIEndpoint,
@@ -190,7 +190,37 @@ def hunt_profiles(request: HttpRequest) -> HttpResponse:
 
 @workspace_permission("prospects.access")
 def create_hunt_profile(request: HttpRequest) -> HttpResponse:
-    form = HuntProfileForm(request.POST or None)
+    presets = list(HuntPreset.objects.filter(is_active=True).order_by("name", "-version"))
+    selected_preset = None
+    initial = None
+    if request.method == "GET" and request.GET.get("preset"):
+        selected_preset = (
+            HuntPreset.objects.filter(is_active=True, key=request.GET["preset"])
+            .order_by("-version")
+            .first()
+        )
+        if selected_preset:
+            initial = {
+                **selected_preset.configuration.get("form_initial", {}),
+                "preset": str(selected_preset.pk),
+                "name": selected_preset.name,
+                "description": selected_preset.description,
+            }
+    form = HuntProfileForm(request.POST or None, initial=initial)
+    if request.method == "POST" and form.is_valid() and form.cleaned_data.get("preset"):
+        selected_preset = HuntPreset.objects.filter(pk=form.cleaned_data["preset"]).first()
+    for preset in presets:
+        preset.source_statuses = []
+        for guidance in preset.source_guidance:
+            adapter = get_lead_source_adapter(
+                guidance["source_key"], workspace=get_request_workspace(request)
+            )
+            preset.source_statuses.append(
+                {
+                    **guidance,
+                    "available": bool(adapter and adapter.is_configured()),
+                }
+            )
     if request.method == "POST" and form.is_valid():
         workspace = get_request_workspace(request)
         profile = HuntProfile.objects.create(
@@ -231,6 +261,7 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                 *form.source_policies(),
             ],
             result_threshold={"min_total_score": form.cleaned_data["minimum_score"]},
+            applied_preset=selected_preset,
         )
         profile.current_version = version
         profile.save(update_fields=["current_version", "updated_at"])
@@ -238,7 +269,11 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
             activate_version(profile, version)
         messages.success(request, f"Hunt Profile “{profile.name}” created.")
         return redirect("command_center:hunt-profiles")
-    return _render(request, "command_center/hunt_profile_form.html", {"form": form})
+    return _render(
+        request,
+        "command_center/hunt_profile_form.html",
+        {"form": form, "presets": presets, "selected_preset": selected_preset},
+    )
 
 
 @require_POST

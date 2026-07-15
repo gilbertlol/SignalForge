@@ -10,6 +10,27 @@ class HuntProfileStatus(models.TextChoices):
     ARCHIVED = "archived", "Archived"
 
 
+class HuntPreset(BaseModel):
+    """Versioned, global starting configuration copied into Hunt Profiles."""
+
+    key = models.SlugField(max_length=100)
+    version = models.PositiveIntegerField(default=1)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    configuration = models.JSONField(default=dict)
+    source_guidance = models.JSONField(default=list)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["key", "version"], name="huntpreset_unique_version")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} v{self.version}"
+
+
 class CriterionOperator(models.TextChoices):
     AND = "AND", "And"
     OR = "OR", "Or"
@@ -188,6 +209,8 @@ class HuntProfileVersion(BaseModel):
     """
 
     profile = models.ForeignKey(HuntProfile, on_delete=models.CASCADE, related_name="versions")
+    applied_preset_key = models.SlugField(max_length=100, blank=True)
+    applied_preset_version = models.PositiveIntegerField(null=True, blank=True)
     version_number = models.PositiveIntegerField()
     root_group = models.ForeignKey(CriterionGroup, on_delete=models.PROTECT, related_name="+")
 
