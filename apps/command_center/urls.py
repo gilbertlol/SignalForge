@@ -17,6 +17,13 @@ urlpatterns = [
     path("settings/providers/new/", views.create_provider, name="create-provider"),
     path("settings/credentials/new/", views.create_credential, name="create-credential"),
     path("settings/lead-sources/apollo/", views.configure_apollo, name="configure-apollo"),
+    path("settings/lead-sources/searxng/", views.configure_searxng, name="configure-searxng"),
+    path(
+        "settings/lead-sources/searxng/test/",
+        views.test_lead_source_connection,
+        {"source_key": "searxng"},
+        name="test-searxng",
+    ),
     path(
         "settings/lead-sources/google-places/",
         views.configure_google_places,

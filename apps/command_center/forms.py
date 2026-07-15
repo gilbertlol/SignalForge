@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from django import forms
 
 from apps.evidence.models import Reliability
@@ -61,6 +63,10 @@ class HuntProfileForm(forms.Form):
     openstreetmap_reliability_weight = forms.IntegerField(
         min_value=0, max_value=100, required=False
     )
+    use_searxng = forms.BooleanField(required=False, label="SearXNG web discovery")
+    searxng_max_records = forms.IntegerField(min_value=1, max_value=50, initial=20, required=False)
+    searxng_budget_cents = forms.IntegerField(min_value=0, required=False, initial=0)
+    searxng_reliability_weight = forms.IntegerField(min_value=0, max_value=100, required=False)
     use_apollo = forms.BooleanField(required=False, label="Apollo Organization Search")
     apollo_max_records = forms.IntegerField(min_value=1, max_value=100, initial=10, required=False)
     apollo_budget_cents = forms.IntegerField(min_value=0, required=False)
@@ -82,7 +88,7 @@ class HuntProfileForm(forms.Form):
     def __init__(self, *args, source_availability=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.source_availability = source_availability or {}
-        for key in ("apollo", "google_places"):
+        for key in ("searxng", "apollo", "google_places"):
             availability = self.source_availability.get(key)
             if availability is None or availability.ready:
                 continue
@@ -97,12 +103,18 @@ class HuntProfileForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
-        for key in ("apollo", "google_places"):
+        for key in ("searxng", "apollo", "google_places"):
             availability = self.source_availability.get(key)
             if cleaned.get(f"use_{key}") and availability and not availability.ready:
                 self.add_error(f"use_{key}", availability.reason)
         selected = any(
-            cleaned.get(key) for key in ("use_openstreetmap", "use_apollo", "use_google_places")
+            cleaned.get(key)
+            for key in (
+                "use_openstreetmap",
+                "use_searxng",
+                "use_apollo",
+                "use_google_places",
+            )
         )
         if cleaned.get("manual_only") and selected:
             self.add_error("manual_only", "Manual-only profiles cannot enable automatic sources.")
@@ -133,14 +145,14 @@ class HuntProfileForm(forms.Form):
             self.add_error("radius_meters", "A radius requires center coordinates.")
         if location_type == "radius" and not cleaned.get("radius_meters"):
             self.add_error("radius_meters", "Set the search radius.")
-        for key in ("openstreetmap", "apollo", "google_places"):
+        for key in ("openstreetmap", "searxng", "apollo", "google_places"):
             if cleaned.get(f"use_{key}") and not cleaned.get(f"{key}_max_records"):
                 self.add_error(f"{key}_max_records", "Set a record limit for this source.")
         return cleaned
 
     def source_policies(self):
         policies = []
-        for key in ("openstreetmap", "apollo", "google_places"):
+        for key in ("openstreetmap", "searxng", "apollo", "google_places"):
             if self.cleaned_data.get(f"use_{key}"):
                 policy = {
                     "source_key": key,
@@ -240,6 +252,32 @@ class GooglePlacesConfigurationForm(forms.Form):
         help_text="Required: standard terms generally permit indefinite storage of Place IDs only.",
     )
     enabled = forms.BooleanField(required=False, initial=True)
+
+
+class SearXNGConfigurationForm(forms.Form):
+    base_url = forms.CharField(
+        help_text="Base instance URL, for example http://searxng:8080.",
+    )
+    access_token = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(render_value=False),
+        help_text="Optional bearer token for a private instance.",
+    )
+    language = forms.CharField(max_length=20, initial="auto")
+    timeout_seconds = forms.IntegerField(min_value=1, max_value=120, initial=20)
+    enabled = forms.BooleanField(required=False, initial=True)
+
+    def clean_base_url(self):
+        value = self.cleaned_data["base_url"]
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise forms.ValidationError("Enter a complete HTTP or HTTPS instance URL.")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise forms.ValidationError(
+                "Use only the instance base URL; credentials, query strings and fragments "
+                "are not allowed."
+            )
+        return value.rstrip("/")
 
 
 class AIEndpointForm(forms.Form):

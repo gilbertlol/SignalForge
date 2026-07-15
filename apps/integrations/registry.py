@@ -12,6 +12,7 @@ from .providers.ai import OpenAICompatibleAdapter
 from .providers.apollo import ApolloLeadSourceAdapter
 from .providers.google_places import GooglePlacesLeadSourceAdapter
 from .providers.openstreetmap import OpenStreetMapLeadSourceAdapter
+from .providers.searxng import SearXNGLeadSourceAdapter
 from .providers.website import PublicWebsiteAnalysisAdapter
 
 _LEAD_SOURCE_ADAPTERS: dict[str, type[LeadSourceAdapter]] = {
@@ -39,7 +40,7 @@ if settings.TESTING:
 
 
 def get_lead_source_adapter(source_key: str, *, workspace=None) -> LeadSourceAdapter | None:
-    if source_key in {"apollo", "google_places"}:
+    if source_key in {"apollo", "google_places", "searxng"}:
         if workspace is None:
             return None
         from .models import LeadSourceConfiguration
@@ -53,11 +54,12 @@ def get_lead_source_adapter(source_key: str, *, workspace=None) -> LeadSourceAda
         )
         if not configuration:
             return None
-        return (
-            ApolloLeadSourceAdapter(configuration)
-            if source_key == "apollo"
-            else GooglePlacesLeadSourceAdapter(configuration)
-        )
+        adapter_classes = {
+            "apollo": ApolloLeadSourceAdapter,
+            "google_places": GooglePlacesLeadSourceAdapter,
+            "searxng": SearXNGLeadSourceAdapter,
+        }
+        return adapter_classes[source_key](configuration)
     adapter_class = _LEAD_SOURCE_ADAPTERS.get(source_key)
     return adapter_class() if adapter_class else None
 

@@ -111,6 +111,14 @@ configuration without printing secrets. Warnings are actionable but do not fail 
 The API is then reachable at `http://localhost:8000`. PostgreSQL and Redis are **not**
 published to the host by default — reach them via `make dbshell` or `docker compose exec`.
 
+### Free web discovery with SearXNG
+
+SignalForge can use any self-hosted SearXNG instance as a free web lead source. Ensure the
+instance enables `json` in `search.formats`, then open **Sources & models**, save its base URL
+(for example `http://searxng:8080` on a shared Compose network), and run live validation.
+An optional bearer token can protect a private instance. Until validation succeeds, SearXNG
+remains disabled in the Hunt Profile builder; OpenStreetMap discovery continues independently.
+
 ## Stopping the stack
 
 ```bash

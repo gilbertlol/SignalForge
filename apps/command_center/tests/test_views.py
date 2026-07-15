@@ -661,6 +661,59 @@ def test_apollo_configuration_is_workspace_scoped_and_rotates_secret(client):
     assert "rotated-apollo-key" not in configuration.credential.encrypted_value
 
 
+def test_searxng_configuration_is_workspace_scoped_and_requires_live_validation(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:configure-searxng"),
+        {
+            "base_url": "http://searxng:8080",
+            "language": "en",
+            "timeout_seconds": 15,
+            "enabled": "on",
+        },
+        follow=True,
+    )
+
+    configuration = LeadSourceConfiguration.objects.get(workspace=workspace, source_key="searxng")
+    assert response.status_code == 200
+    assert configuration.base_url == "http://searxng:8080"
+    assert configuration.credential is None
+    assert configuration.config == {"language": "en"}
+    builder = client.get(reverse("command_center:create-hunt-profile"))
+    assert builder.context["form"].fields["use_searxng"].disabled is True
+    assert b"Run live validation first" in builder.content
+
+
+@patch("apps.integrations.services.get_lead_source_adapter")
+def test_searxng_live_validation_enables_the_hunt_source(mock_get_adapter, client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    configuration = LeadSourceConfiguration.objects.create(
+        workspace=workspace,
+        source_key="searxng",
+        name="SearXNG",
+        base_url="http://searxng:8080",
+        credential=None,
+    )
+    adapter = mock_get_adapter.return_value
+    adapter.is_configured.return_value = True
+    adapter.search.return_value = []
+    client.force_login(user)
+
+    response = client.post(reverse("command_center:test-searxng"), follow=True)
+
+    assert response.status_code == 200
+    assert configuration.health_checks.get().was_successful is True
+    builder = client.get(reverse("command_center:create-hunt-profile"))
+    assert builder.context["form"].fields["use_searxng"].disabled is False
+    assert b"Instance validated" in builder.content
+
+
 @override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")
 @patch("apps.integrations.services.get_lead_source_adapter")
 def test_apollo_live_validation_reports_success(mock_get_adapter, client):

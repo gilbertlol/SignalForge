@@ -48,19 +48,22 @@ def lead_source_availability(workspace, source_key: str) -> SourceAvailability:
         return SourceAvailability(source_key, True, "Free open source · ready", False)
     if source_key in {"manual", "csv_import"}:
         return SourceAvailability(source_key, True, "Local input · ready", False)
+    is_paid = source_key in {"apollo", "google_places"}
     configuration = LeadSourceConfiguration.objects.filter(
         workspace=workspace, source_key=source_key, enabled=True
     ).first()
     if configuration is None:
-        return SourceAvailability(source_key, False, "API key not configured", True)
+        reason = "API key not configured" if is_paid else "Instance not configured"
+        return SourceAvailability(source_key, False, reason, is_paid)
     latest = configuration.health_checks.order_by("-created_at").first()
     if latest is None:
-        return SourceAvailability(source_key, False, "Run live validation first", True)
+        return SourceAvailability(source_key, False, "Run live validation first", is_paid)
     if latest.created_at < timezone.now() - timedelta(hours=24):
-        return SourceAvailability(source_key, False, "Validation expired · test again", True)
+        return SourceAvailability(source_key, False, "Validation expired · test again", is_paid)
     if not latest.was_successful:
-        return SourceAvailability(source_key, False, latest.get_status_display(), True)
-    return SourceAvailability(source_key, True, "Customer API key validated", True)
+        return SourceAvailability(source_key, False, latest.get_status_display(), is_paid)
+    reason = "Customer API key validated" if is_paid else "Instance validated · free"
+    return SourceAvailability(source_key, True, reason, is_paid)
 
 
 def check_lead_source(configuration: LeadSourceConfiguration) -> LeadSourceHealthCheck:

@@ -63,6 +63,7 @@ from .forms import (
     OpportunityStatusForm,
     OrganizationCreateForm,
     ProfileActionForm,
+    SearXNGConfigurationForm,
 )
 
 
@@ -197,7 +198,7 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
     source_availability = {
         key: lead_source_availability(workspace, key)
-        for key in ("openstreetmap", "apollo", "google_places")
+        for key in ("openstreetmap", "searxng", "apollo", "google_places")
     }
     presets = list(HuntPreset.objects.filter(is_active=True).order_by("name", "-version"))
     selected_preset = None
@@ -215,11 +216,12 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                 "name": selected_preset.name,
                 "description": selected_preset.description,
             }
-            for key in ("apollo", "google_places"):
+            for key in ("searxng", "apollo", "google_places"):
                 if not source_availability[key].ready:
                     initial[f"use_{key}"] = False
             if not any(
-                initial.get(f"use_{key}") for key in ("openstreetmap", "apollo", "google_places")
+                initial.get(f"use_{key}")
+                for key in ("openstreetmap", "searxng", "apollo", "google_places")
             ):
                 initial["manual_only"] = True
     form = HuntProfileForm(
@@ -300,6 +302,7 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
             "presets": presets,
             "selected_preset": selected_preset,
             "display_preset": display_preset,
+            "searxng_availability": source_availability["searxng"],
             "apollo_availability": source_availability["apollo"],
             "google_places_availability": source_availability["google_places"],
         },
@@ -340,7 +343,7 @@ def start_discovery(request: HttpRequest, pk) -> HttpResponse:
     usable = [
         policy
         for policy in policies
-        if policy.source_key not in {"apollo", "google_places"}
+        if policy.source_key not in {"searxng", "apollo", "google_places"}
         or lead_source_availability(profile.workspace, policy.source_key).ready
     ]
     if not usable:
@@ -400,8 +403,10 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
     lead_sources = list(LeadSourceConfiguration.objects.filter(workspace=workspace))
     apollo = next((source for source in lead_sources if source.source_key == "apollo"), None)
     google = next((source for source in lead_sources if source.source_key == "google_places"), None)
+    searxng = next((source for source in lead_sources if source.source_key == "searxng"), None)
     apollo_availability = lead_source_availability(workspace, "apollo")
     google_availability = lead_source_availability(workspace, "google_places")
+    searxng_availability = lead_source_availability(workspace, "searxng")
     source_catalog = [
         {
             "name": "OpenStreetMap",
@@ -419,6 +424,18 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "attribution": "© OpenStreetMap contributors · Open Database License (ODbL)",
             "attribution_url": "https://www.openstreetmap.org/copyright",
             "ready": True,
+        },
+        {
+            "name": "SearXNG Web Search",
+            "source_key": "searxng",
+            "state": searxng_availability.reason,
+            "cost": "Free self-hosted metasearch · upstream engines may impose limits",
+            "limits": "Up to 50 results per hunt · bounded query and safe-search enabled",
+            "capabilities": "Public web discovery with query, rank, URL and engine provenance",
+            "attribution": "SearXNG and the upstream engine returned with each result",
+            "attribution_url": "https://docs.searxng.org/",
+            "ready": searxng_availability.ready,
+            "configuration": searxng,
         },
         {
             "name": "Apollo Organization Search",
@@ -461,6 +478,14 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "source_catalog": source_catalog,
             "apollo_form": ApolloConfigurationForm(),
             "google_places_form": GooglePlacesConfigurationForm(),
+            "searxng_form": SearXNGConfigurationForm(
+                initial={
+                    "base_url": searxng.base_url if searxng else "http://searxng:8080",
+                    "language": searxng.config.get("language", "auto") if searxng else "auto",
+                    "timeout_seconds": searxng.timeout_seconds if searxng else 20,
+                    "enabled": searxng.enabled if searxng else True,
+                }
+            ),
             "credentials": CredentialReference.objects.filter(workspace=workspace),
             "provider_form": AIProviderForm(),
             "credential_form": CredentialForm(),
@@ -563,7 +588,8 @@ def configure_google_places(request: HttpRequest) -> HttpResponse:
     if not created:
         old_credential = configuration.credential
         configuration.credential = credential
-        old_credential.delete()
+        if old_credential:
+            old_credential.delete()
         configuration.health_checks.all().delete()
     configuration.base_url = "https://places.googleapis.com/v1/places:searchText"
     configuration.timeout_seconds = form.cleaned_data["timeout_seconds"]
@@ -577,12 +603,49 @@ def configure_google_places(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 @workspace_permission("providers.manage")
+def configure_searxng(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = SearXNGConfigurationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "SearXNG configuration is invalid.")
+        return redirect("command_center:provider-settings")
+    configuration, _ = LeadSourceConfiguration.objects.get_or_create(
+        workspace=workspace,
+        source_key="searxng",
+        defaults={"name": "SearXNG Web Search"},
+    )
+    access_token = form.cleaned_data["access_token"]
+    if access_token:
+        credential = configuration.credential or CredentialReference(
+            workspace=workspace, name="SearXNG access token"
+        )
+        credential.set_secret(access_token)
+        credential.save()
+        configuration.credential = credential
+    configuration.base_url = form.cleaned_data["base_url"]
+    configuration.timeout_seconds = form.cleaned_data["timeout_seconds"]
+    configuration.estimated_cost_per_page_cents = 0
+    configuration.enabled = form.cleaned_data["enabled"]
+    configuration.config = {"language": form.cleaned_data["language"]}
+    configuration.save()
+    configuration.health_checks.all().delete()
+    messages.success(request, "SearXNG configuration saved. Run live validation to enable it.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
 def test_lead_source_connection(request: HttpRequest, source_key: str) -> HttpResponse:
     workspace = get_request_workspace(request)
     configuration = LeadSourceConfiguration.objects.filter(
         workspace=workspace, source_key=source_key, enabled=True
     ).first()
-    display_name = "Google Places" if source_key == "google_places" else "Apollo"
+    display_names = {
+        "apollo": "Apollo",
+        "google_places": "Google Places",
+        "searxng": "SearXNG",
+    }
+    display_name = display_names.get(source_key, source_key)
     if configuration is None:
         messages.error(request, f"{display_name} is not configured and enabled.")
         return redirect("command_center:provider-settings")

@@ -17,11 +17,12 @@
       <div><strong>Cost & limits</strong><small>{{ source.cost }}</small><small>{{ source.limits }}</small></div>
       <div><strong>Data terms</strong><small>{% if source.attribution_url %}<a href="{{ source.attribution_url }}" target="_blank" rel="noreferrer">{{ source.attribution }}</a>{% else %}{{ source.attribution }}{% endif %}</small></div>
     </div>
-    {% if source.configuration %}<form method="post" action="{% if source.source_key == 'apollo' %}{% url 'command_center:test-apollo' %}{% else %}{% url 'command_center:test-google-places' %}{% endif %}">{% csrf_token %}<button class="button secondary">Run live validation</button><small>Performs a real one-result search and may consume customer credits.</small></form>{% endif %}
+    {% if source.configuration %}<form method="post" action="{% if source.source_key == 'apollo' %}{% url 'command_center:test-apollo' %}{% elif source.source_key == 'searxng' %}{% url 'command_center:test-searxng' %}{% else %}{% url 'command_center:test-google-places' %}{% endif %}">{% csrf_token %}<button class="button secondary">Run live validation</button><small>Performs a real one-result search{% if source.source_key != 'searxng' %} and may consume customer credits{% endif %}.</small></form>{% endif %}
   </article>
   {% endfor %}
 </section>
 
+<section class="panel form-panel"><h2>Configure SearXNG</h2><p class="muted">Free, self-hosted web discovery. SignalForge sends bounded search terms to your instance and retains the result URL, rank, query, and upstream-engine provenance.</p><form method="post" action="{% url 'command_center:configure-searxng' %}">{% csrf_token %}{{ searxng_form.as_p }}<button class="button">Save SearXNG configuration</button></form></section>
 <section class="panel form-panel"><h2>Configure Apollo</h2><p class="muted">Optional commercial source. The API key is encrypted and never displayed. A valid key may still be rejected when Organization Search is not included in your Apollo plan.</p><form method="post" action="{% url 'command_center:configure-apollo' %}">{% csrf_token %}{{ apollo_form.as_p }}<button class="button">Save Apollo configuration</button></form></section>
 <section class="panel form-panel"><h2>Configure Google Places</h2><p class="muted">Uses Places API (New) Text Search. Google generally permits indefinite storage of Place IDs only; enable persisted business fields only if your agreement permits it. Google Maps attribution must remain visible with returned content.</p><form method="post" action="{% url 'command_center:configure-google-places' %}">{% csrf_token %}{{ google_places_form.as_p }}<button class="button">Save Google Places configuration</button></form></section>
 

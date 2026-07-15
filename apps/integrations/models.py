@@ -55,7 +55,11 @@ class LeadSourceConfiguration(WorkspaceScopedModel):
     name = models.CharField(max_length=255)
     base_url = models.URLField(default="https://api.apollo.io/api/v1/mixed_companies/search")
     credential = models.ForeignKey(
-        CredentialReference, on_delete=models.PROTECT, related_name="lead_source_configurations"
+        CredentialReference,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="lead_source_configurations",
     )
     timeout_seconds = models.PositiveIntegerField(default=30)
     estimated_cost_per_page_cents = models.PositiveIntegerField(default=0)

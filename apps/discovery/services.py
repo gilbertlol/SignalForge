@@ -187,6 +187,7 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
             },
         )
         if execution.status == ProviderResultStatus.QUEUED and policy.source_key in {
+            "searxng",
             "apollo",
             "google_places",
         }:
@@ -203,7 +204,10 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
 def _payload_external_id(source_key: str, payload: dict[str, Any]) -> str:
     provider_id = payload.get("id") or payload.get("organization_id")
     if provider_id:
-        return str(provider_id)
+        value = str(provider_id)
+        if len(value) <= 255:
+            return value
+        return f"sha256:{hashlib.sha256(value.encode()).hexdigest()}"
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
@@ -266,7 +270,7 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         )
     except Exception as exc:  # noqa: BLE001 - source failure is persisted and isolated
         error = str(exc)
-        if policy.source_key in {"apollo", "google_places"}:
+        if policy.source_key in {"searxng", "apollo", "google_places"}:
             record_lead_source_outcome(run.workspace, policy.source_key, error)
         status = (
             ProviderResultStatus.RATE_LIMITED
@@ -275,7 +279,7 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         )
         return _finish_provider_failure(execution, error, status=status)
 
-    if policy.source_key in {"apollo", "google_places"}:
+    if policy.source_key in {"searxng", "apollo", "google_places"}:
         record_lead_source_outcome(run.workspace, policy.source_key)
 
     execution.refresh_from_db(fields=["status"])
