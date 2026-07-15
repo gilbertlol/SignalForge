@@ -206,7 +206,10 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                 "name": selected_preset.name,
                 "description": selected_preset.description,
             }
-    form = HuntProfileForm(request.POST or None, initial=initial)
+    form = HuntProfileForm(
+        request.POST if request.method == "POST" else None,
+        initial=initial,
+    )
     if request.method == "POST" and form.is_valid() and form.cleaned_data.get("preset"):
         selected_preset = HuntPreset.objects.filter(pk=form.cleaned_data["preset"]).first()
     for preset in presets:

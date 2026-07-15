@@ -163,6 +163,47 @@ def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_pr
     assert version.result_threshold.min_total_score == 17
 
 
+def test_funded_growth_preset_defaults_create_a_profile(client):
+    user = UserFactory()
+    client.force_login(user)
+    preset = HuntPreset.objects.get(key="funded-growing-companies", version=1)
+
+    response = client.post(
+        reverse("command_center:create-hunt-profile") + "?preset=funded-growing-companies",
+        {
+            "preset": preset.pk,
+            "name": preset.name,
+            "description": preset.description,
+            "minimum_score": 15,
+            "use_apollo": "on",
+            "apollo_max_records": 40,
+            "apollo_budget_cents": 100,
+            "apollo_reliability_weight": 70,
+            "reliability_weight": 70,
+            "activate_now": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    profile = HuntProfile.objects.get(name="Funded and growing companies")
+    assert profile.current_version.applied_preset_key == "funded-growing-companies"
+    policy = profile.current_version.source_policies.get()
+    assert policy.source_key == "apollo"
+    assert policy.max_records == 40
+    assert policy.budget_cents == 100
+
+
+def test_hunt_profile_validation_errors_are_summarized_at_top(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    response = client.post(reverse("command_center:create-hunt-profile"), {})
+
+    assert response.status_code == 200
+    assert b"The Hunt Profile was not created" in response.content
+    assert b"Name: This field is required" in response.content
+
+
 @patch("apps.command_center.views.run_discovery_task.delay")
 def test_start_discovery_dispatches_workspace_scoped_run(mock_delay, client):
     user = UserFactory()
