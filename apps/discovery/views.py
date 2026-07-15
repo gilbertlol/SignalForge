@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -7,6 +8,7 @@ from rest_framework.response import Response
 from apps.accounts.permissions import HasWorkspacePermission
 from apps.core.services import get_request_workspace
 
+from .analytics import build_source_scorecards
 from .models import DiscoveryRun, DiscoveryRunStatus
 from .serializers import (
     DiscoveryRunSerializer,
@@ -65,6 +67,31 @@ class DiscoveryRunViewSet(viewsets.ModelViewSet):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         return Response(SourceRecordSerializer(queryset, many=True).data)
+
+    @action(detail=True, methods=["get"], url_path="source-scorecards")
+    def source_scorecards(self, request: Request, pk=None) -> Response:
+        run = self._get_run(pk)
+        return Response(build_source_scorecards(DiscoveryRun.objects.filter(pk=run.pk)))
+
+    @action(detail=False, methods=["get"], url_path="source-scorecards")
+    def aggregate_source_scorecards(self, request: Request) -> Response:
+        runs = self.get_queryset()
+        profile = request.query_params.get("profile")
+        date_from = request.query_params.get("date_from")
+        date_to = request.query_params.get("date_to")
+        niche = request.query_params.get("niche")
+        if profile:
+            runs = runs.filter(hunt_profile_version__profile_id=profile)
+        if date_from:
+            runs = runs.filter(created_at__date__gte=date_from)
+        if date_to:
+            runs = runs.filter(created_at__date__lte=date_to)
+        if niche:
+            runs = runs.filter(
+                Q(hunt_profile_version__profile__name__icontains=niche)
+                | Q(hunt_profile_version__search_scope__industries__contains=[niche])
+            )
+        return Response(build_source_scorecards(runs))
 
     @action(detail=True, methods=["post"], url_path="source-records/manual")
     def manual_source_record(self, request: Request, pk=None) -> Response:

@@ -70,6 +70,22 @@ def test_review_queue_is_source_records_filtered_by_qualified_status(api_client)
     assert all(r["status"] == "qualified" for r in response.data)
 
 
+def test_run_source_scorecards_are_machine_readable(api_client):
+    profile_id, _org = _active_profile_id(api_client)
+    run_response = api_client.post(
+        "/api/v1/discovery-runs/", {"hunt_profile": profile_id}, format="json"
+    )
+
+    response = api_client.get(
+        f"/api/v1/discovery-runs/{run_response.data['id']}/source-scorecards/"
+    )
+
+    assert response.status_code == 200
+    assert response.data["scorecards"][0]["source_key"] == "demo"
+    assert response.data["scorecards"][0]["sample_warning"]
+    assert response.data["recommendation"]["is_directional"] is True
+
+
 def test_manual_source_record_endpoint(api_client):
     profile_id, _org = _active_profile_id(api_client)
     run_response = api_client.post(

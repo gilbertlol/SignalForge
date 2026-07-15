@@ -294,10 +294,20 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
 
     execution.status = ProviderResultStatus.SUCCEEDED if created else ProviderResultStatus.EMPTY
     execution.records_returned = execution.records.count()
+    execution.pages_requested = getattr(adapter, "last_pages_requested", 1)
+    execution.pages_returned = getattr(adapter, "last_pages_returned", 1 if results else 0)
     execution.cost_cents = cost if execution.records_returned else 0
     execution.finished_at = timezone.now()
     execution.save(
-        update_fields=["status", "records_returned", "cost_cents", "finished_at", "updated_at"]
+        update_fields=[
+            "status",
+            "records_returned",
+            "pages_requested",
+            "pages_returned",
+            "cost_cents",
+            "finished_at",
+            "updated_at",
+        ]
     )
     return execution
 
@@ -310,8 +320,23 @@ def _finish_provider_failure(
 ) -> ProviderResult:
     execution.status = status
     execution.error = error
+    execution.failure_count += 1
+    if status == ProviderResultStatus.RATE_LIMITED:
+        execution.rate_limit_count += 1
+    if status == ProviderResultStatus.TIMED_OUT:
+        execution.timeout_count += 1
     execution.finished_at = timezone.now()
-    execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
+    execution.save(
+        update_fields=[
+            "status",
+            "error",
+            "failure_count",
+            "rate_limit_count",
+            "timeout_count",
+            "finished_at",
+            "updated_at",
+        ]
+    )
     return execution
 
 

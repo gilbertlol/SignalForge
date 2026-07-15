@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 from django.core.exceptions import ValidationError
 
+from apps.discovery.analytics import build_source_scorecards
 from apps.discovery.models import (
     DiscoveryRunStatus,
     MatchMethod,
@@ -269,6 +270,14 @@ def test_multiple_sources_merge_with_claim_provenance_and_conflicts():
     assert headcount.has_conflict is False
     assert industry.distinct_value_count == 2
     assert industry.has_conflict is True
+
+    analytics = build_source_scorecards(type(run).objects.filter(pk=run.pk))
+    cards = {card["source_key"]: card for card in analytics["scorecards"]}
+    assert cards["source-a"]["cross_source_overlaps"] == 1
+    assert cards["source-a"]["multi_touch_organizations"] == 1
+    assert cards["source-b"]["fractional_organization_credit"] == 0.5
+    assert cards["source-a"]["sample_warning"]
+    assert analytics["recommendation"]["is_directional"] is True
 
     record = records[0]
     record.raw_payload = {"tampered": True}

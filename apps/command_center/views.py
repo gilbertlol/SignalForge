@@ -18,6 +18,7 @@ from apps.communications.models import Conversation, Message, MessageStatus
 from apps.communications.services import SendBlocked, approve_message, send_message
 from apps.contacts.models import Contact
 from apps.core.services import get_request_workspace
+from apps.discovery.analytics import build_source_scorecards
 from apps.discovery.models import (
     DiscoveryRun,
     DiscoveryRunStatus,
@@ -629,6 +630,7 @@ def _run_monitor_context(request: HttpRequest) -> dict:
         policies = {p.source_key: p for p in run.hunt_profile_version.source_policies.all()}
         providers = list(run.provider_results.all())
         run.providers_live = providers
+        run.source_analytics = build_source_scorecards(DiscoveryRun.objects.filter(pk=run.pk))
         run.is_terminal_ui = run.status in run_terminal
         run.elapsed_seconds_ui = int(
             ((run.finished_at or now) - (run.started_at or run.created_at)).total_seconds()

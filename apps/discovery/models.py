@@ -207,7 +207,15 @@ class ProviderResult(BaseModel):
     attempt_count = models.PositiveIntegerField(default=0)
     celery_task_id = models.CharField(max_length=255, blank=True)
     records_returned = models.IntegerField(default=0)
+    pages_requested = models.PositiveIntegerField(default=0)
+    pages_returned = models.PositiveIntegerField(default=0)
     cost_cents = models.IntegerField(default=0)
+    reported_cost_cents = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True
+    )
+    failure_count = models.PositiveIntegerField(default=0)
+    rate_limit_count = models.PositiveIntegerField(default=0)
+    timeout_count = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)

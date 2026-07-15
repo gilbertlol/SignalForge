@@ -98,6 +98,8 @@ class GooglePlacesLeadSourceAdapter(LeadSourceAdapter):
             body["pageToken"] = token
             body["pageSize"] = min(20, limit - len(results))
         self.last_search_cost_cents = pages * page_cost
+        self.last_pages_requested = pages
+        self.last_pages_returned = pages
         return results[:limit]
 
     def _request(self, body):
