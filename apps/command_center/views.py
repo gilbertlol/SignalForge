@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import timedelta
 from functools import wraps
 from typing import cast
 
@@ -9,6 +10,7 @@ from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.accounts.models import User
@@ -20,6 +22,8 @@ from apps.discovery.models import (
     DiscoveryRun,
     DiscoveryRunStatus,
     DiscoveryRunTrigger,
+    ProviderResult,
+    ProviderResultStatus,
     SourceRecord,
     SourceRecordStatus,
 )
@@ -488,10 +492,70 @@ def test_provider_connection(request: HttpRequest, pk) -> HttpResponse:
 
 @workspace_permission("prospects.access")
 def run_monitor(request: HttpRequest) -> HttpResponse:
-    runs = DiscoveryRun.objects.filter(workspace=get_request_workspace(request)).select_related(
-        "hunt_profile_version__profile", "initiated_by"
-    )[:100]
-    return _render(request, "command_center/runs.html", {"runs": runs})
+    return _render(request, "command_center/runs.html", _run_monitor_context(request))
+
+
+def _run_monitor_context(request: HttpRequest) -> dict:
+    runs = list(
+        DiscoveryRun.objects.filter(workspace=get_request_workspace(request))
+        .select_related("hunt_profile_version__profile", "initiated_by")
+        .prefetch_related("provider_results__records", "hunt_profile_version__source_policies")[:100]
+    )
+    now = timezone.now()
+    provider_terminal = {
+        ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY, ProviderResultStatus.FAILED,
+        ProviderResultStatus.PARTIAL, ProviderResultStatus.TIMED_OUT,
+        ProviderResultStatus.CANCELED, ProviderResultStatus.BUDGET_BLOCKED,
+    }
+    run_terminal = {DiscoveryRunStatus.SUCCEEDED, DiscoveryRunStatus.FAILED, DiscoveryRunStatus.PARTIAL, DiscoveryRunStatus.CANCELED}
+    for run in runs:
+        policies = {p.source_key: p for p in run.hunt_profile_version.source_policies.all()}
+        providers = list(run.provider_results.all())
+        run.providers_live = providers
+        run.is_terminal_ui = run.status in run_terminal
+        run.elapsed_seconds_ui = int(((run.finished_at or now) - (run.started_at or run.created_at)).total_seconds())
+        run.phase_ui = "complete" if run.is_terminal_ui else ("downstream processing" if providers and all(p.status in provider_terminal for p in providers) else "provider search")
+        for provider in providers:
+            policy = policies.get(provider.provider_key)
+            provider.elapsed_seconds_ui = int(((provider.finished_at or now) - (provider.started_at or provider.created_at)).total_seconds())
+            provider.deadline_ui = provider.started_at + timedelta(seconds=policy.timeout_seconds) if provider.started_at and policy else None
+            provider.can_cancel_ui = provider.status in {ProviderResultStatus.QUEUED, ProviderResultStatus.RETRYING, ProviderResultStatus.RATE_LIMITED}
+    return {"runs": runs, "has_active_runs": any(not run.is_terminal_ui for run in runs)}
+
+
+@workspace_permission("prospects.access")
+def run_status_fragment(request: HttpRequest) -> HttpResponse:
+    return _render(request, "command_center/_run_status.html", _run_monitor_context(request))
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def cancel_run(request: HttpRequest, pk) -> HttpResponse:
+    run = get_object_or_404(DiscoveryRun, workspace=get_request_workspace(request), pk=pk)
+    if run.status not in {DiscoveryRunStatus.SUCCEEDED, DiscoveryRunStatus.FAILED, DiscoveryRunStatus.PARTIAL, DiscoveryRunStatus.CANCELED}:
+        run.status = DiscoveryRunStatus.CANCELED
+        run.finished_at = timezone.now()
+        run.save(update_fields=["status", "finished_at", "updated_at"])
+        for provider in run.provider_results.exclude(status__in=[ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY, ProviderResultStatus.FAILED, ProviderResultStatus.CANCELED]):
+            provider.status = ProviderResultStatus.CANCELED
+            provider.finished_at = timezone.now()
+            provider.save(update_fields=["status", "finished_at", "updated_at"])
+        messages.success(request, "Discovery run canceled.")
+    return redirect("command_center:runs")
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def cancel_source(request: HttpRequest, pk) -> HttpResponse:
+    provider = get_object_or_404(ProviderResult, discovery_run__workspace=get_request_workspace(request), pk=pk)
+    if provider.status in {ProviderResultStatus.QUEUED, ProviderResultStatus.RETRYING, ProviderResultStatus.RATE_LIMITED}:
+        provider.status = ProviderResultStatus.CANCELED
+        provider.finished_at = timezone.now()
+        provider.save(update_fields=["status", "finished_at", "updated_at"])
+        messages.success(request, f"{provider.provider_key} execution canceled.")
+    else:
+        messages.info(request, "This source can only be canceled safely before active execution.")
+    return redirect("command_center:runs")
 
 
 @workspace_permission("prospects.access")

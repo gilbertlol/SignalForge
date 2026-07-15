@@ -162,6 +162,22 @@ def test_all_providers_failing_marks_the_run_failed():
     assert run.provider_results.get().status == ProviderResultStatus.FAILED
 
 
+@patch("apps.discovery.services.get_lead_source_adapter")
+def test_provider_rate_limit_is_explicitly_persisted(mock_get_adapter):
+    adapter = mock_get_adapter.return_value
+    adapter.search.side_effect = RuntimeError("Provider rate limit was reached.")
+    adapter.estimated_search_cost_cents = 0
+    profile = HuntProfileFactory()
+    version = _version(profile, source_policies=[{"source_key": "limited"}])
+    run = start_run(version, trigger="manual")
+    execution = prepare_provider_executions(run)[0]
+
+    execute_provider_search(execution.id)
+
+    execution.refresh_from_db()
+    assert execution.status == ProviderResultStatus.RATE_LIMITED
+
+
 def test_partial_provider_failure_does_not_corrupt_the_run():
     profile = HuntProfileFactory()
     version = _version(

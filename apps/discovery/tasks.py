@@ -51,7 +51,9 @@ def run_provider_task(self, provider_result_id: str) -> str:
     policy = execution.discovery_run.hunt_profile_version.source_policies.filter(
         source_key=execution.provider_key, is_enabled=True
     ).first()
-    if execution.status == "failed" and policy and execution.attempt_count <= policy.max_retries:
+    if execution.status in {"failed", "rate_limited"} and policy and execution.attempt_count <= policy.max_retries:
+        execution.status = "retrying"
+        execution.save(update_fields=["status", "updated_at"])
         raise self.retry(
             countdown=min(60, 2 ** execution.attempt_count),
             max_retries=policy.max_retries,

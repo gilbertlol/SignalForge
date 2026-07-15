@@ -7,6 +7,8 @@ from django.urls import reverse
 from apps.accounts.models import AccessPermission
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Workspace
+from apps.discovery.models import DiscoveryRunStatus, ProviderResult, ProviderResultStatus
+from apps.discovery.services import start_run
 from apps.hunting.models import HuntProfile
 from apps.hunting.services import create_version
 from apps.integrations.models import (
@@ -176,6 +178,37 @@ def test_start_discovery_rejects_unconfigured_live_source(mock_delay, client):
     assert b"Apollo" in response.content
     assert not profile.current_version.discovery_runs.exists()
     mock_delay.assert_not_called()
+
+
+def test_run_monitor_renders_independent_provider_outcomes(client):
+    user = UserFactory(); client.force_login(user)
+    client.post(reverse("command_center:create-hunt-profile"), {"name":"Monitored","minimum_score":1,"use_openstreetmap":"on","openstreetmap_max_records":5,"geographies":"Toronto"})
+    profile = HuntProfile.objects.get(name="Monitored")
+    run = start_run(profile.current_version, trigger="manual", initiated_by=user)
+    run.status = DiscoveryRunStatus.RUNNING; run.save()
+    ProviderResult.objects.create(discovery_run=run, provider_key="openstreetmap", status=ProviderResultStatus.RETRYING, attempt_count=2, records_returned=3)
+
+    response = client.get(reverse("command_center:run-status-fragment"))
+
+    assert response.status_code == 200
+    assert b"openstreetmap" in response.content
+    assert b"Retrying" in response.content
+    assert b"2 attempts" in response.content
+
+
+def test_cancel_run_marks_nonterminal_sources_canceled(client):
+    user = UserFactory(); client.force_login(user)
+    client.post(reverse("command_center:create-hunt-profile"), {"name":"Cancelable","minimum_score":1,"use_openstreetmap":"on","openstreetmap_max_records":5,"geographies":"Toronto"})
+    profile = HuntProfile.objects.get(name="Cancelable")
+    run = start_run(profile.current_version, trigger="manual", initiated_by=user)
+    source = ProviderResult.objects.create(discovery_run=run, provider_key="openstreetmap")
+
+    response = client.post(reverse("command_center:cancel-run", kwargs={"pk":run.pk}))
+
+    run.refresh_from_db(); source.refresh_from_db()
+    assert response.status_code == 302
+    assert run.status == DiscoveryRunStatus.CANCELED
+    assert source.status == ProviderResultStatus.CANCELED
 
 
 def test_create_hunt_profile_persists_independent_multi_source_policies(client):

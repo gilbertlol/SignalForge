@@ -17,6 +17,7 @@ from django.db import transaction
 from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
+from billiard.exceptions import SoftTimeLimitExceeded
 
 from apps.evidence.models import Reliability, SourceType, VerificationStatus
 from apps.evidence.services import record_evidence, record_organization_claims
@@ -208,8 +209,27 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
 
     try:
         results = adapter.search(execution.query_snapshot)
+    except SoftTimeLimitExceeded:
+        return _finish_provider_failure(
+            execution, "Provider execution exceeded its configured deadline.",
+            status=ProviderResultStatus.TIMED_OUT,
+        )
     except Exception as exc:  # noqa: BLE001 - source failure is persisted and isolated
-        return _finish_provider_failure(execution, str(exc))
+        error = str(exc)
+        status = (
+            ProviderResultStatus.RATE_LIMITED
+            if "rate limit" in error.lower()
+            else ProviderResultStatus.FAILED
+        )
+        return _finish_provider_failure(execution, error, status=status)
+
+    execution.refresh_from_db(fields=["status"])
+    run.refresh_from_db(fields=["status"])
+    if execution.status == ProviderResultStatus.CANCELED or run.status == DiscoveryRunStatus.CANCELED:
+        execution.status = ProviderResultStatus.CANCELED
+        execution.finished_at = timezone.now()
+        execution.save(update_fields=["status", "finished_at", "updated_at"])
+        return execution
 
     cost = estimated_search_cost if results else 0
     record_cost = 10 if settings.TESTING and policy.source_key == "demo" else 0
@@ -241,8 +261,13 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
     return execution
 
 
-def _finish_provider_failure(execution: ProviderResult, error: str) -> ProviderResult:
-    execution.status = ProviderResultStatus.FAILED
+def _finish_provider_failure(
+    execution: ProviderResult,
+    error: str,
+    *,
+    status: str = ProviderResultStatus.FAILED,
+) -> ProviderResult:
+    execution.status = status
     execution.error = error
     execution.finished_at = timezone.now()
     execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
