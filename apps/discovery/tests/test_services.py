@@ -2,15 +2,21 @@ from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.test import override_settings
 
 from apps.discovery.analytics import build_source_scorecards
 from apps.discovery.models import (
     DiscoveryRunStatus,
+    EnrichmentRun,
     MatchMethod,
     ProviderResultStatus,
+    SourceRecord,
     SourceRecordStatus,
+    WebPageObservation,
 )
 from apps.discovery.services import (
+    _collect_evidence,
+    _enrich,
     create_manual_source_record,
     execute_provider_search,
     execute_run,
@@ -19,7 +25,12 @@ from apps.discovery.services import (
     start_run,
 )
 from apps.discovery.tests.factories import SuppressionEntryFactory
-from apps.evidence.models import Evidence, OrganizationClaim, OrganizationFieldResolution
+from apps.evidence.models import (
+    Evidence,
+    OrganizationClaim,
+    OrganizationFieldResolution,
+    SourceType,
+)
 from apps.hunting.services import create_version
 from apps.hunting.tests.factories import HuntProfileFactory
 from apps.organizations.models import Organization
@@ -64,6 +75,63 @@ def test_unvalidated_paid_source_is_skipped_while_open_source_stays_queued():
 
 def _version(profile, **kwargs):
     return create_version(profile, criteria=_always_matches_domain(), **kwargs)
+
+
+@override_settings(TESTING=False)
+@patch("apps.discovery.services.get_website_analysis_adapter")
+def test_public_page_observation_is_reused_and_becomes_observed_evidence(mock_get_adapter):
+    profile = HuntProfileFactory()
+    version = _version(profile)
+    run = start_run(version, trigger="manual")
+    organization = Organization.objects.create(
+        workspace=profile.workspace,
+        name="Observed Co",
+        domain="observed.example",
+        dedupe_key="observed.example",
+    )
+    records = [
+        SourceRecord.objects.create(
+            discovery_run=run,
+            source_key="searxng",
+            external_id=f"result-{index}",
+            raw_payload={"source_url": "https://observed.example/about"},
+            normalized_data={"name": "Observed Co", "domain": "observed.example"},
+            status=SourceRecordStatus.NORMALIZED,
+            organization=organization,
+        )
+        for index in range(2)
+    ]
+    adapter = mock_get_adapter.return_value
+    adapter.analyze.return_value = {
+        "requested_url": "https://observed.example/about",
+        "url": "https://observed.example/about",
+        "canonical_url": "https://observed.example/company",
+        "title": "Observed Co",
+        "description": "Precision manufacturing observed on the company website.",
+        "visible_text": "Observed Co builds precision components.",
+        "contact_links": ["mailto:hello@observed.example"],
+        "technologies": ["WordPress"],
+        "observed_bytes": 1200,
+        "content_sha256": "a" * 64,
+    }
+
+    _enrich(run)
+    _collect_evidence(run)
+
+    assert adapter.analyze.call_count == 1
+    observation = WebPageObservation.objects.get(workspace=profile.workspace)
+    assert observation.canonical_url == "https://observed.example/company"
+    results = {
+        item.source_record_id: item.result
+        for item in EnrichmentRun.objects.filter(source_record__in=records)
+    }
+    assert sorted(result["reused"] for result in results.values()) == [False, True]
+    evidence = Evidence.objects.filter(
+        workspace=profile.workspace, source_type=SourceType.WEBSITE
+    ).first()
+    assert evidence is not None
+    assert evidence.source_url == "https://observed.example/company"
+    assert evidence.excerpt == "Precision manufacturing observed on the company website."
 
 
 def test_full_pipeline_discovers_normalizes_dedupes_enriches_and_qualifies():

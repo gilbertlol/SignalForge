@@ -1,6 +1,13 @@
 from django.contrib import admin
 
-from .models import DiscoveryRun, EnrichmentRun, ProviderResult, SourceRecord, SuppressionEntry
+from .models import (
+    DiscoveryRun,
+    EnrichmentRun,
+    ProviderResult,
+    SourceRecord,
+    SuppressionEntry,
+    WebPageObservation,
+)
 
 
 @admin.register(DiscoveryRun)
@@ -41,3 +48,10 @@ class SuppressionEntryAdmin(admin.ModelAdmin):
     list_display = ("domain", "is_active", "reason", "workspace")
     list_filter = ("is_active", "workspace")
     search_fields = ("domain",)
+
+
+@admin.register(WebPageObservation)
+class WebPageObservationAdmin(admin.ModelAdmin):
+    list_display = ("title", "canonical_url", "observed_bytes", "observed_at", "workspace")
+    search_fields = ("canonical_url", "title", "content_sha256")
+    readonly_fields = ("content_sha256", "observed_at")

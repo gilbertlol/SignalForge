@@ -190,6 +190,32 @@ class EnrichmentRun(BaseModel):
         return f"{self.provider_key} enrichment for {self.source_record_id}"
 
 
+class WebPageObservation(WorkspaceScopedModel):
+    """Reusable bounded observation of public HTML, never executable page content."""
+
+    requested_url = models.TextField()
+    final_url = models.TextField()
+    canonical_url = models.TextField()
+    canonical_sha256 = models.CharField(max_length=64)
+    content_sha256 = models.CharField(max_length=64)
+    title = models.CharField(max_length=300, blank=True)
+    description = models.TextField(blank=True)
+    visible_text = models.TextField(blank=True)
+    contact_links = models.JSONField(default=list, blank=True)
+    technologies = models.JSONField(default=list, blank=True)
+    observed_bytes = models.PositiveIntegerField(default=0)
+    observed_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "canonical_sha256", "content_sha256"],
+                name="web_observation_unique_content",
+            )
+        ]
+        indexes = [models.Index(fields=["workspace", "created_at"])]
+
+
 class ProviderResult(BaseModel):
     """One provider's outcome within a run — what makes partial provider
     failure isolated and measurable rather than corrupting the whole run."""

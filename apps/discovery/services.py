@@ -11,11 +11,13 @@ import hashlib
 import io
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -45,6 +47,7 @@ from .models import (
     SourceRecord,
     SourceRecordStatus,
     SuppressionEntry,
+    WebPageObservation,
 )
 
 
@@ -564,24 +567,66 @@ def _records_ready_for(run: DiscoveryRun) -> Any:
 
 def _enrich(run: DiscoveryRun) -> None:
     enriched_count = 0
+    domain_fetches: dict[str, int] = {}
     for record in _records_ready_for(run):
         provider_key = "demo" if settings.TESTING else "public_website"
         if EnrichmentRun.objects.filter(source_record=record, provider_key=provider_key).exists():
             continue
         domain = record.normalized_data.get("domain", "")
+        target_url = record.raw_payload.get("source_url") or (f"https://{domain}" if domain else "")
         adapter = (
             get_technology_detection_adapter("demo")
             if settings.TESTING
             else get_website_analysis_adapter("public_website")
         )
-        if adapter is None or not domain:
+        if adapter is None or not target_url:
             continue
-        try:
-            analysis = (
-                {"technologies": adapter.detect(domain)}
-                if settings.TESTING
-                else adapter.analyze(domain)
+        cached = None
+        if not settings.TESTING:
+            cached = (
+                WebPageObservation.objects.filter(
+                    workspace=run.workspace,
+                    created_at__gte=timezone.now() - timedelta(hours=24),
+                )
+                .filter(
+                    models.Q(requested_url=target_url)
+                    | models.Q(final_url=target_url)
+                    | models.Q(canonical_url=target_url)
+                )
+                .order_by("-created_at")
+                .first()
             )
+        try:
+            if settings.TESTING:
+                analysis = {"technologies": adapter.detect(domain)}
+            elif cached:
+                analysis = _observation_result(cached, reused=True)
+            else:
+                target_host = urlparse(target_url).hostname or domain
+                if domain_fetches.get(target_host, 0) >= 5:
+                    raise RuntimeError("Public website retrieval reached the per-domain run limit.")
+                domain_fetches[target_host] = domain_fetches.get(target_host, 0) + 1
+                analysis = adapter.analyze(target_url)
+                observation, _ = WebPageObservation.objects.get_or_create(
+                    workspace=run.workspace,
+                    canonical_sha256=hashlib.sha256(
+                        analysis["canonical_url"].encode()
+                    ).hexdigest(),
+                    content_sha256=analysis["content_sha256"],
+                    defaults={
+                        "canonical_url": analysis["canonical_url"],
+                        "requested_url": analysis["requested_url"],
+                        "final_url": analysis["url"],
+                        "title": analysis["title"],
+                        "description": analysis["description"],
+                        "visible_text": analysis["visible_text"],
+                        "contact_links": analysis["contact_links"],
+                        "technologies": analysis["technologies"],
+                        "observed_bytes": analysis["observed_bytes"],
+                        "observed_at": timezone.now(),
+                    },
+                )
+                analysis = _observation_result(observation, reused=False)
         except Exception as exc:  # noqa: BLE001 - enrichment is best-effort, never fails the record
             EnrichmentRun.objects.create(
                 source_record=record,
@@ -603,6 +648,24 @@ def _enrich(run: DiscoveryRun) -> None:
         run.save(update_fields=["records_enriched", "updated_at"])
 
 
+def _observation_result(observation: WebPageObservation, *, reused: bool) -> dict[str, Any]:
+    return {
+        "observation_id": str(observation.id),
+        "requested_url": observation.requested_url,
+        "url": observation.final_url,
+        "canonical_url": observation.canonical_url,
+        "content_sha256": observation.content_sha256,
+        "title": observation.title,
+        "description": observation.description,
+        "visible_text": observation.visible_text,
+        "contact_links": observation.contact_links,
+        "technologies": observation.technologies,
+        "observed_bytes": observation.observed_bytes,
+        "observed_at": observation.observed_at.isoformat(),
+        "reused": reused,
+    }
+
+
 # --- collect evidence --------------------------------------------------------------
 
 
@@ -611,15 +674,25 @@ def _collect_evidence(run: DiscoveryRun) -> None:
         org = record.organization
         domain = record.normalized_data.get("domain", "")
         name = record.normalized_data.get("name", "")
-        source_type = SourceType.OTHER
+        enrichment = record.enrichment_runs.filter(
+            provider_key="public_website", status=EnrichmentRunStatus.SUCCEEDED
+        ).first()
+        observed = enrichment.result if enrichment else {}
+        observed_excerpt = (
+            observed.get("description")
+            or observed.get("visible_text", "")[:1000]
+            or observed.get("title")
+        )
+        source_type = SourceType.WEBSITE if observed_excerpt else SourceType.OTHER
         record_evidence(
             org,
-            source_url=record.raw_payload.get("source_url")
+            source_url=observed.get("canonical_url")
+            or record.raw_payload.get("source_url")
             or (f"https://{domain}" if domain else ""),
             source_type=source_type,
             observed_date=timezone.now().date(),
-            excerpt=f"Discovered via {record.source_key} ({name})",
-            reliability=Reliability.MEDIUM,
+            excerpt=observed_excerpt or f"Discovered via {record.source_key} ({name})",
+            reliability=Reliability.HIGH if observed_excerpt else Reliability.MEDIUM,
             verification_status=VerificationStatus.UNVERIFIED,
             is_inferred=False,
         )

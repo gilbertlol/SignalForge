@@ -53,7 +53,7 @@ class Evidence(BaseModel):
     object_id = models.UUIDField()
     subject = GenericForeignKey("content_type", "object_id")
 
-    source_url = models.URLField(blank=True)
+    source_url = models.TextField(blank=True)
     source_type = models.CharField(max_length=20, choices=SourceType.choices)
     observed_date = models.DateField()
     excerpt = models.TextField()
