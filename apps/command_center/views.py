@@ -210,7 +210,8 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
         request.POST if request.method == "POST" else None,
         initial=initial,
     )
-    if request.method == "POST" and form.is_valid() and form.cleaned_data.get("preset"):
+    form_valid = form.is_valid() if request.method == "POST" else False
+    if request.method == "POST" and form.cleaned_data.get("preset"):
         selected_preset = HuntPreset.objects.filter(pk=form.cleaned_data["preset"]).first()
     for preset in presets:
         preset.source_statuses = []
@@ -225,14 +226,10 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                 }
             )
     display_preset = next(
-        (
-            preset
-            for preset in presets
-            if selected_preset and preset.pk == selected_preset.pk
-        ),
+        (preset for preset in presets if selected_preset and preset.pk == selected_preset.pk),
         presets[0] if presets else None,
     )
-    if request.method == "POST" and form.is_valid():
+    if request.method == "POST" and form_valid:
         workspace = get_request_workspace(request)
         profile = HuntProfile.objects.create(
             workspace=workspace,

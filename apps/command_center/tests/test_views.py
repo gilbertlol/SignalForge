@@ -207,6 +207,27 @@ def test_hunt_profile_validation_errors_are_summarized_at_top(client):
     assert b"Name: This field is required" in response.content
 
 
+def test_invalid_preset_submission_keeps_the_selected_preview(client):
+    user = UserFactory()
+    client.force_login(user)
+    preset = HuntPreset.objects.get(key="funded-growing-companies", version=1)
+
+    response = client.post(
+        reverse("command_center:create-hunt-profile") + "?preset=funded-growing-companies",
+        {
+            "preset": preset.pk,
+            "minimum_score": 15,
+            "use_apollo": "on",
+            "apollo_max_records": 40,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.context["selected_preset"] == preset
+    assert response.context["display_preset"].pk == preset.pk
+    assert b"Almost there" in response.content
+
+
 @patch("apps.command_center.views.run_discovery_task.delay")
 def test_start_discovery_dispatches_workspace_scoped_run(mock_delay, client):
     user = UserFactory()
