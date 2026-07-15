@@ -1,0 +1,4 @@
+{% extends "command_center/base.html" %}{% block title %}Add organization{% endblock %}{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Manual intelligence</p><h1>Add an organization</h1><p>Build a record from what you already know. Every entered field becomes a traceable manual claim.</p></div><a class="button secondary" href="{% url 'command_center:organizations' %}">Cancel</a></div>
+<section class="panel form-panel"><form method="post">{% csrf_token %}{{ form.as_p }}<button class="button">Create organization</button></form></section>
+{% endblock %}

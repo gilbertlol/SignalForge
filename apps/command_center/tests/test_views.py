@@ -14,6 +14,8 @@ from apps.discovery.models import (
     SourceRecord,
 )
 from apps.discovery.services import start_run
+from apps.evidence.models import OrganizationClaim, OrganizationFieldResolution
+from apps.evidence.services import create_manual_claim
 from apps.hunting.models import HuntProfile
 from apps.hunting.services import create_version
 from apps.integrations.models import (
@@ -24,6 +26,7 @@ from apps.integrations.models import (
     ProviderHealthCheck,
 )
 from apps.opportunities.tests.factories import OpportunityFactory
+from apps.organizations.models import Organization
 from apps.organizations.tests.factories import OrganizationFactory
 
 pytestmark = pytest.mark.django_db
@@ -387,6 +390,80 @@ def test_organization_detail_links_original_source_and_attribution(client):
 
     assert b"View original provider record" in response.content
     assert b"OpenStreetMap contributors" in response.content
+
+
+def test_manual_organization_correction_preserves_claim_history(client):
+    user = UserFactory()
+    client.force_login(user)
+    response = client.post(
+        reverse("command_center:create-organization"),
+        {
+            "name": "Hand Built Co",
+            "domain": "handbuilt.test",
+            "industry": "consulting",
+            "location": "Montreal",
+            "employee_count": 8,
+            "website_url": "https://handbuilt.test",
+            "phone": "555-0100",
+            "notes": "Met at an event",
+        },
+    )
+    organization = Organization.objects.get(name="Hand Built Co")
+    assert response.status_code == 302
+    assert organization.source_claims.count() == 8
+    assert not organization.source_claims.exclude(source_key="manual").exists()
+
+    client.post(
+        reverse("command_center:add-manual-claim", kwargs={"pk": organization.pk}),
+        {
+            "field_name": "industry",
+            "value": "automation consulting",
+            "reliability": "high",
+            "note": "Confirmed directly by the owner.",
+        },
+    )
+    claims = OrganizationClaim.objects.filter(organization=organization, field_name="industry")
+    assert claims.count() == 2
+    correction = claims.get(value="automation consulting")
+
+    client.post(
+        reverse("command_center:prefer-claim", kwargs={"pk": correction.pk}),
+        {"note": "Owner-confirmed value."},
+    )
+    resolution = OrganizationFieldResolution.objects.get(
+        organization=organization, field_name="industry"
+    )
+    assert resolution.selected_claim == correction
+    assert resolution.is_manually_selected is True
+    assert resolution.has_conflict is True
+    assert resolution.selection_note == "Owner-confirmed value."
+
+
+def test_manual_claim_writes_cannot_cross_workspaces(client):
+    user = UserFactory()
+    foreign_workspace = Workspace.objects.create(name="Foreign claims", slug="foreign-claims")
+    foreign_organization = OrganizationFactory(workspace=foreign_workspace)
+    foreign_claim = create_manual_claim(
+        foreign_organization,
+        field_name="industry",
+        value="private",
+        reliability="high",
+        note="Foreign workspace data.",
+    )
+    client.force_login(user)
+
+    add_response = client.post(
+        reverse("command_center:add-manual-claim", kwargs={"pk": foreign_organization.pk}),
+        {"field_name": "industry", "value": "leak", "reliability": "high", "note": "x"},
+    )
+    prefer_response = client.post(
+        reverse("command_center:prefer-claim", kwargs={"pk": foreign_claim.pk}),
+        {"note": "Try to select foreign data."},
+    )
+
+    assert add_response.status_code == 404
+    assert prefer_response.status_code == 404
+    assert not OrganizationClaim.objects.filter(value="leak").exists()
 
 
 @override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")

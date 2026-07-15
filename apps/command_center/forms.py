@@ -1,5 +1,6 @@
 from django import forms
 
+from apps.evidence.models import Reliability
 from apps.hunting.models import HuntProfileStatus
 from apps.integrations.models import (
     AIEndpoint,
@@ -116,6 +117,37 @@ class ProfileActionForm(forms.Form):
 
 class OpportunityStatusForm(forms.Form):
     status = forms.ChoiceField(choices=OpportunityStatus.choices)
+
+
+class OrganizationCreateForm(forms.Form):
+    name = forms.CharField(max_length=255)
+    domain = forms.CharField(max_length=255, required=False)
+    industry = forms.CharField(max_length=255, required=False)
+    location = forms.CharField(max_length=255, required=False)
+    employee_count = forms.IntegerField(min_value=0, required=False)
+    website_url = forms.URLField(required=False, assume_scheme="https")
+    phone = forms.CharField(max_length=100, required=False)
+    notes = forms.CharField(widget=forms.Textarea, required=False)
+
+
+class ManualClaimForm(forms.Form):
+    field_name = forms.ChoiceField(
+        choices=[
+            ("name", "Name"),
+            ("domain", "Domain"),
+            ("industry", "Industry"),
+            ("location", "Location"),
+            ("employee_count", "Employee count"),
+            ("website_url", "Website"),
+            ("phone", "Phone"),
+            ("notes", "Notes"),
+        ]
+    )
+    value = forms.CharField(widget=forms.Textarea)
+    reliability = forms.ChoiceField(choices=Reliability.choices, initial=Reliability.HIGH)
+    note = forms.CharField(
+        widget=forms.Textarea, help_text="Why this value is being added or corrected."
+    )
 
 
 class AIProviderForm(forms.Form):

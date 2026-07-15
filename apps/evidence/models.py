@@ -1,5 +1,6 @@
 import datetime
 
+from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
@@ -103,7 +104,11 @@ class OrganizationClaim(BaseModel):
         Organization, on_delete=models.CASCADE, related_name="source_claims"
     )
     source_record = models.ForeignKey(
-        "discovery.SourceRecord", on_delete=models.PROTECT, related_name="claims"
+        "discovery.SourceRecord",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="claims",
     )
     source_key = models.CharField(max_length=100)
     field_name = models.CharField(max_length=100)
@@ -113,12 +118,17 @@ class OrganizationClaim(BaseModel):
         max_length=10, choices=Reliability.choices, default=Reliability.MEDIUM
     )
     observed_at = models.DateTimeField()
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    note = models.TextField(blank=True)
 
     class Meta:
         ordering = ["field_name", "created_at"]
         constraints = [
             models.UniqueConstraint(
                 fields=["source_record", "field_name"],
+                condition=models.Q(source_record__isnull=False),
                 name="organization_claim_unique_record_field",
             )
         ]
@@ -129,9 +139,12 @@ class OrganizationClaim(BaseModel):
             raise ValidationError("Organization claims are immutable; create a new claim instead.")
         if self.workspace_id != self.organization.workspace_id:
             raise ValidationError("Claim and organization must share a workspace.")
-        if self.workspace_id != self.source_record.discovery_run.workspace_id:
+        if (
+            self.source_record_id
+            and self.workspace_id != self.source_record.discovery_run.workspace_id
+        ):
             raise ValidationError("Claim and source record must share a workspace.")
-        if self.source_record.organization_id != self.organization_id:
+        if self.source_record_id and self.source_record.organization_id != self.organization_id:
             raise ValidationError("Claim organization must match its source record.")
         return super().save(*args, **kwargs)
 
@@ -152,6 +165,11 @@ class OrganizationFieldResolution(BaseModel):
     has_conflict = models.BooleanField(default=False)
     explanation = models.TextField(blank=True)
     resolved_at = models.DateTimeField()
+    is_manually_selected = models.BooleanField(default=False)
+    selection_note = models.TextField(blank=True)
+    selected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
 
     class Meta:
         ordering = ["field_name"]

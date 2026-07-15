@@ -29,6 +29,8 @@ from apps.discovery.models import (
 )
 from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
+from apps.evidence.models import OrganizationClaim
+from apps.evidence.services import create_manual_claim, select_organization_claim
 from apps.hunting.models import HuntProfile, HuntProfileStatus
 from apps.hunting.services import activate_version, archive, create_version, pause
 from apps.integrations.models import (
@@ -42,6 +44,7 @@ from apps.integrations.registry import get_lead_source_adapter
 from apps.integrations.services import check_provider
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
+from apps.organizations.services import create_organization
 
 from .forms import (
     AIEndpointForm,
@@ -51,7 +54,9 @@ from .forms import (
     CredentialForm,
     GooglePlacesConfigurationForm,
     HuntProfileForm,
+    ManualClaimForm,
     OpportunityStatusForm,
+    OrganizationCreateForm,
     ProfileActionForm,
 )
 
@@ -724,6 +729,34 @@ def organizations(request: HttpRequest) -> HttpResponse:
 
 
 @workspace_permission("prospects.access")
+def create_organization_manual(request: HttpRequest) -> HttpResponse:
+    form = OrganizationCreateForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        workspace = get_request_workspace(request)
+        organization, created = create_organization(
+            workspace,
+            name=form.cleaned_data["name"],
+            domain=form.cleaned_data["domain"],
+        )
+        if not created:
+            messages.error(request, "An organization with that domain already exists.")
+            return redirect("command_center:organization-detail", pk=organization.pk)
+        for field_name, value in form.cleaned_data.items():
+            if value not in (None, ""):
+                create_manual_claim(
+                    organization,
+                    field_name=field_name,
+                    value=value,
+                    reliability="high",
+                    note="Entered during manual organization creation.",
+                    actor=request.user,
+                )
+        messages.success(request, f"{organization.name} created manually.")
+        return redirect("command_center:organization-detail", pk=organization.pk)
+    return _render(request, "command_center/organization_form.html", {"form": form})
+
+
+@workspace_permission("prospects.access")
 def organization_detail(request: HttpRequest, pk) -> HttpResponse:
     workspace = get_request_workspace(request)
     organization = get_object_or_404(Organization, workspace=workspace, pk=pk)
@@ -744,8 +777,36 @@ def organization_detail(request: HttpRequest, pk) -> HttpResponse:
             "source_records": SourceRecord.objects.filter(organization=organization).select_related(
                 "provider_result"
             ),
+            "manual_claim_form": ManualClaimForm(),
         },
     )
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def add_manual_claim(request: HttpRequest, pk) -> HttpResponse:
+    organization = get_object_or_404(Organization, workspace=get_request_workspace(request), pk=pk)
+    form = ManualClaimForm(request.POST)
+    if form.is_valid():
+        claim = create_manual_claim(organization, actor=request.user, **form.cleaned_data)
+        messages.success(request, f"Manual {claim.field_name} claim added; original data retained.")
+    else:
+        messages.error(request, "The manual correction is invalid.")
+    return redirect("command_center:organization-detail", pk=pk)
+
+
+@require_POST
+@workspace_permission("prospects.access")
+def prefer_claim(request: HttpRequest, pk) -> HttpResponse:
+    claim = get_object_or_404(
+        OrganizationClaim,
+        organization__workspace=get_request_workspace(request),
+        pk=pk,
+    )
+    note = request.POST.get("note", "Selected manually by an operator.").strip()
+    select_organization_claim(claim, actor=request.user, note=note)
+    messages.success(request, f"Preferred {claim.field_name} value updated; alternatives retained.")
+    return redirect("command_center:organization-detail", pk=claim.organization_id)
 
 
 @workspace_permission("communications.access")

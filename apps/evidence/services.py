@@ -110,13 +110,20 @@ def resolve_organization_claims(organization) -> list[OrganizationFieldResolutio
     field_names = organization.source_claims.values_list("field_name", flat=True).distinct()
     for field_name in field_names:
         claims = list(organization.source_claims.filter(field_name=field_name))
-        selected = max(
-            claims,
-            key=lambda claim: (
-                _RELIABILITY_RANK.get(claim.reliability, 0),
-                claim.observed_at,
-                claim.created_at,
-            ),
+        existing = OrganizationFieldResolution.objects.filter(
+            organization=organization, field_name=field_name, is_manually_selected=True
+        ).first()
+        selected = (
+            existing.selected_claim
+            if existing and existing.selected_claim in claims
+            else max(
+                claims,
+                key=lambda claim: (
+                    _RELIABILITY_RANK.get(claim.reliability, 0),
+                    claim.observed_at,
+                    claim.created_at,
+                ),
+            )
         )
         distinct_values = {claim.normalized_value for claim in claims}
         corroboration_count = sum(
@@ -124,9 +131,17 @@ def resolve_organization_claims(organization) -> list[OrganizationFieldResolutio
         )
         has_conflict = len(distinct_values) > 1
         explanation = (
-            f"Selected {selected.source_key} using reliability then freshness; "
-            f"corroborated by {corroboration_count} claim(s)"
-            + (f" with {len(distinct_values) - 1} conflicting value(s)." if has_conflict else ".")
+            existing.selection_note
+            if existing and existing.selected_claim == selected
+            else (
+                f"Selected {selected.source_key} using reliability then freshness; "
+                f"corroborated by {corroboration_count} claim(s)"
+                + (
+                    f" with {len(distinct_values) - 1} conflicting value(s)."
+                    if has_conflict
+                    else "."
+                )
+            )
         )
         resolution, _ = OrganizationFieldResolution.objects.update_or_create(
             organization=organization,
@@ -139,7 +154,66 @@ def resolve_organization_claims(organization) -> list[OrganizationFieldResolutio
                 "has_conflict": has_conflict,
                 "explanation": explanation,
                 "resolved_at": timezone.now(),
+                "is_manually_selected": bool(existing and existing.selected_claim == selected),
+                "selection_note": existing.selection_note
+                if existing and existing.selected_claim == selected
+                else "",
+                "selected_by": existing.selected_by
+                if existing and existing.selected_claim == selected
+                else None,
             },
         )
         resolutions.append(resolution)
     return resolutions
+
+
+@transaction.atomic
+def create_manual_claim(
+    organization, *, field_name: str, value: Any, reliability: str, note: str = "", actor=None
+) -> OrganizationClaim:
+    claim = OrganizationClaim.objects.create(
+        workspace=organization.workspace,
+        organization=organization,
+        source_record=None,
+        source_key="manual",
+        field_name=field_name,
+        value=value,
+        normalized_value=_canonical_claim_value(value),
+        reliability=reliability,
+        observed_at=timezone.now(),
+        created_by=actor,
+        note=note,
+    )
+    resolve_organization_claims(organization)
+    return claim
+
+
+@transaction.atomic
+def select_organization_claim(
+    claim: OrganizationClaim, *, actor=None, note: str
+) -> OrganizationFieldResolution:
+    resolution, _ = OrganizationFieldResolution.objects.update_or_create(
+        organization=claim.organization,
+        field_name=claim.field_name,
+        defaults={
+            "workspace": claim.workspace,
+            "selected_claim": claim,
+            "is_manually_selected": True,
+            "selection_note": note,
+            "selected_by": actor,
+            "resolved_at": timezone.now(),
+        },
+    )
+    resolve_organization_claims(claim.organization)
+    if claim.field_name in {"name", "domain"} and isinstance(claim.value, str):
+        organization = claim.organization
+        if claim.field_name == "name":
+            organization.name = claim.value
+            organization.save(update_fields=["name", "updated_at"])
+        else:
+            from apps.organizations.services import normalize_domain
+
+            organization.domain = normalize_domain(claim.value)
+            organization.dedupe_key = organization.domain
+            organization.save(update_fields=["domain", "dedupe_key", "updated_at"])
+    return resolution
