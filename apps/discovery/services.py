@@ -146,13 +146,25 @@ def _discover(run: DiscoveryRun) -> None:
             continue
 
         started_at = timezone.now()
-        adapter = get_lead_source_adapter(policy.source_key)
+        adapter = get_lead_source_adapter(policy.source_key, workspace=run.workspace)
         if adapter is None:
             ProviderResult.objects.create(
                 discovery_run=run,
                 provider_key=policy.source_key,
                 status=ProviderResultStatus.FAILED,
                 error=f"No lead source adapter registered for {policy.source_key!r}.",
+                started_at=started_at,
+                finished_at=timezone.now(),
+            )
+            continue
+
+        estimated_search_cost = getattr(adapter, "estimated_search_cost_cents", 0)
+        if policy.budget_cents is not None and estimated_search_cost > policy.budget_cents:
+            ProviderResult.objects.create(
+                discovery_run=run,
+                provider_key=policy.source_key,
+                status=ProviderResultStatus.FAILED,
+                error="Configured provider page cost exceeds this source budget.",
                 started_at=started_at,
                 finished_at=timezone.now(),
             )
@@ -172,12 +184,10 @@ def _discover(run: DiscoveryRun) -> None:
             continue
 
         created = 0
-        cost = 0
+        cost = estimated_search_cost if results else 0
+        record_cost = _MOCK_COST_PER_RECORD_CENTS if policy.source_key == "demo" else 0
         for payload in results:
-            if (
-                policy.budget_cents is not None
-                and cost + _MOCK_COST_PER_RECORD_CENTS > policy.budget_cents
-            ):
+            if policy.budget_cents is not None and cost + record_cost > policy.budget_cents:
                 break
             SourceRecord.objects.create(
                 discovery_run=run,
@@ -186,7 +196,7 @@ def _discover(run: DiscoveryRun) -> None:
                 status=SourceRecordStatus.PENDING,
             )
             created += 1
-            cost += _MOCK_COST_PER_RECORD_CENTS
+            cost += record_cost
 
         ProviderResult.objects.create(
             discovery_run=run,
@@ -216,9 +226,22 @@ def _normalize_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
     of relying on this generic fallback chain.
     """
     name = raw_payload.get("company_name") or raw_payload.get("name") or ""
-    domain_raw = raw_payload.get("website") or raw_payload.get("domain") or ""
+    domain_raw = (
+        raw_payload.get("website")
+        or raw_payload.get("domain")
+        or raw_payload.get("primary_domain")
+        or raw_payload.get("website_url")
+        or ""
+    )
     domain = normalize_domain(domain_raw) if domain_raw else ""
-    return {"name": name, "domain": domain}
+    return {
+        "name": name,
+        "domain": domain,
+        "external_id": raw_payload.get("id") or raw_payload.get("organization_id") or "",
+        "industry": raw_payload.get("industry") or "",
+        "employee_count": raw_payload.get("estimated_num_employees"),
+        "linkedin_url": raw_payload.get("linkedin_url") or "",
+    }
 
 
 def _normalize(run: DiscoveryRun) -> None:
@@ -262,7 +285,11 @@ def _deduplicate(run: DiscoveryRun) -> None:
             record.save(update_fields=["status", "updated_at"])
             continue
 
-        org, created = create_organization(workspace, name=name, domain=domain)
+        external_id = record.normalized_data.get("external_id", "")
+        external_ids = {record.source_key: external_id} if external_id else {}
+        org, created = create_organization(
+            workspace, name=name, domain=domain, external_ids=external_ids
+        )
         record.organization = org
         if not created:
             record.status = SourceRecordStatus.DUPLICATE

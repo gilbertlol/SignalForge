@@ -51,6 +51,25 @@ class CredentialReference(WorkspaceScopedModel):
         return decrypt_secret(self.encrypted_value)
 
 
+class LeadSourceConfiguration(WorkspaceScopedModel):
+    source_key = models.SlugField(max_length=100)
+    name = models.CharField(max_length=255)
+    base_url = models.URLField(default="https://api.apollo.io/api/v1/mixed_companies/search")
+    credential = models.ForeignKey(
+        CredentialReference, on_delete=models.PROTECT, related_name="lead_source_configurations"
+    )
+    timeout_seconds = models.PositiveIntegerField(default=30)
+    estimated_cost_per_page_cents = models.PositiveIntegerField(default=0)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "source_key"], name="uniq_lead_source_workspace_key"
+            )
+        ]
+
+
 class AIEndpoint(WorkspaceScopedModel):
     provider = models.ForeignKey(AIProvider, on_delete=models.CASCADE, related_name="endpoints")
     name = models.CharField(max_length=255)

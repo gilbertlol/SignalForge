@@ -27,7 +27,13 @@ from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
 from apps.hunting.models import HuntProfile, HuntProfileStatus
 from apps.hunting.services import activate_version, archive, create_version, pause
-from apps.integrations.models import AIEndpoint, AIProvider, CredentialReference, ModelDefinition
+from apps.integrations.models import (
+    AIEndpoint,
+    AIProvider,
+    CredentialReference,
+    LeadSourceConfiguration,
+    ModelDefinition,
+)
 from apps.integrations.services import check_provider
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
@@ -36,6 +42,7 @@ from .forms import (
     AIEndpointForm,
     AIModelForm,
     AIProviderForm,
+    ApolloConfigurationForm,
     CredentialForm,
     HuntProfileForm,
     OpportunityStatusForm,
@@ -153,7 +160,7 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
             criteria={"type": "group", "operator": "AND", "children": [criterion]},
             source_policies=[
                 {
-                    "source_key": "demo",
+                    "source_key": form.cleaned_data["lead_source"] or "demo",
                     "max_records": form.cleaned_data["maximum_records"],
                 }
             ],
@@ -244,6 +251,8 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
         "command_center/provider_settings.html",
         {
             "providers": providers,
+            "lead_sources": LeadSourceConfiguration.objects.filter(workspace=workspace),
+            "apollo_form": ApolloConfigurationForm(),
             "credentials": CredentialReference.objects.filter(workspace=workspace),
             "provider_form": AIProviderForm(),
             "credential_form": CredentialForm(),
@@ -278,6 +287,49 @@ def create_credential(request: HttpRequest) -> HttpResponse:
         messages.success(request, "Credential encrypted and stored.")
     else:
         messages.error(request, "Credential configuration is invalid.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def configure_apollo(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = ApolloConfigurationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Apollo configuration is invalid.")
+        return redirect("command_center:provider-settings")
+
+    configuration = (
+        LeadSourceConfiguration.objects.filter(workspace=workspace, source_key="apollo")
+        .select_related("credential")
+        .first()
+    )
+    if configuration:
+        credential = configuration.credential
+        credential.name = "Apollo API key"
+        credential.set_secret(form.cleaned_data["api_key"])
+        credential.save()
+        configuration.name = form.cleaned_data["name"]
+        configuration.timeout_seconds = form.cleaned_data["timeout_seconds"]
+        configuration.estimated_cost_per_page_cents = form.cleaned_data[
+            "estimated_cost_per_page_cents"
+        ]
+        configuration.enabled = form.cleaned_data["enabled"]
+        configuration.save()
+    else:
+        credential = CredentialReference(workspace=workspace, name="Apollo API key")
+        credential.set_secret(form.cleaned_data["api_key"])
+        credential.save()
+        LeadSourceConfiguration.objects.create(
+            workspace=workspace,
+            source_key="apollo",
+            name=form.cleaned_data["name"],
+            credential=credential,
+            timeout_seconds=form.cleaned_data["timeout_seconds"],
+            estimated_cost_per_page_cents=form.cleaned_data["estimated_cost_per_page_cents"],
+            enabled=form.cleaned_data["enabled"],
+        )
+    messages.success(request, "Apollo configuration saved and API key encrypted.")
     return redirect("command_center:provider-settings")
 
 

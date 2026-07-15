@@ -12,6 +12,7 @@ from .adapters import (
     TechnologyDetectionAdapter,
 )
 from .providers.ai import MockAIModelAdapter, OpenAICompatibleAdapter
+from .providers.apollo import ApolloLeadSourceAdapter
 from .providers.demo import DemoLeadSourceAdapter, DemoTechnologyDetectionAdapter
 from .providers.messaging import MockEmailAdapter, MockSMSAdapter
 
@@ -35,7 +36,20 @@ _MESSAGING_ADAPTERS: dict[str, type[MessagingAdapter]] = {
 }
 
 
-def get_lead_source_adapter(source_key: str) -> LeadSourceAdapter | None:
+def get_lead_source_adapter(source_key: str, *, workspace=None) -> LeadSourceAdapter | None:
+    if source_key == "apollo":
+        if workspace is None:
+            return None
+        from .models import LeadSourceConfiguration
+
+        configuration = (
+            LeadSourceConfiguration.objects.filter(
+                workspace=workspace, source_key=source_key, enabled=True
+            )
+            .select_related("credential")
+            .first()
+        )
+        return ApolloLeadSourceAdapter(configuration) if configuration else None
     adapter_class = _LEAD_SOURCE_ADAPTERS.get(source_key)
     return adapter_class() if adapter_class else None
 

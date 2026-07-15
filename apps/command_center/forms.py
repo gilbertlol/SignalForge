@@ -11,6 +11,11 @@ class HuntProfileForm(forms.Form):
     require_domain = forms.BooleanField(required=False, initial=True)
     minimum_score = forms.IntegerField(min_value=0, initial=10)
     maximum_records = forms.IntegerField(min_value=1, max_value=1000, initial=25)
+    lead_source = forms.ChoiceField(
+        choices=[("demo", "Demo data"), ("apollo", "Apollo Organization Search")],
+        required=False,
+        initial="demo",
+    )
     activate_now = forms.BooleanField(required=False, initial=True)
 
 
@@ -37,6 +42,18 @@ class AIProviderForm(forms.Form):
 class CredentialForm(forms.Form):
     name = forms.CharField(max_length=255)
     secret = forms.CharField(widget=forms.PasswordInput(render_value=False))
+
+
+class ApolloConfigurationForm(forms.Form):
+    name = forms.CharField(max_length=255, initial="Apollo Organization Search")
+    api_key = forms.CharField(widget=forms.PasswordInput(render_value=False))
+    timeout_seconds = forms.IntegerField(min_value=1, max_value=120, initial=30)
+    estimated_cost_per_page_cents = forms.IntegerField(
+        min_value=0,
+        initial=0,
+        help_text="Optional estimate for hunt-budget enforcement; check your Apollo plan.",
+    )
+    enabled = forms.BooleanField(required=False, initial=True)
 
 
 class AIEndpointForm(forms.Form):

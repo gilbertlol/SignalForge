@@ -52,8 +52,9 @@ does not yet contain a command-center frontend or real external providers; see
   [Lead discovery, enrichment, and scheduled runs](#lead-discovery-enrichment-and-scheduled-runs).
 - A minimal `AuditLogEntry` model and `record()` service (`apps.audit`) — a base for future
   auditing, not the complete audit system.
-- A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for future lead sources,
-  messaging providers, and AI models. No real provider is wired up yet.
+- A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for lead sources,
+  messaging providers, and AI models, including Apollo Organization Search as the first
+  production lead source.
 - PostgreSQL, Redis, Celery, and Celery Beat, all orchestrated through Docker Compose.
 - `/health/live` and `/health/ready` endpoints.
 - Structured JSON application logging.
@@ -242,13 +243,21 @@ Redis → worker wiring; it has no business meaning.
   a `hunt_profile`'s current version) and runs it via Celery immediately.
 - **Providers are looked up by key, never hard-coded** — `apps.integrations.registry` resolves
   a `source_key` string (e.g. `"demo"`) to a concrete adapter. `apps.integrations.providers.demo`
-  ships one working `LeadSourceAdapter` and one `TechnologyDetectionAdapter` so the whole
+  ships one deterministic `LeadSourceAdapter` and one `TechnologyDetectionAdapter` so the whole
   pipeline is exercisable without any real credentials; `SourcePolicy.source_key` (from
   GOR-242) is what a `HuntProfileVersion` uses to configure which sources run, with
   `max_records`/`budget_cents` enforced per source. A version with no `SourcePolicy` rows at
   all falls back to the demo source; a version with an explicit
   `[{"source_key": "demo", "is_enabled": false}]` runs no automatic discovery at all
   (manual entry / CSV import only) — that distinction is deliberate, not an oversight.
+- **Apollo Organization Search** is available with `source_key="apollo"`. Store or rotate its
+  API key under Command center → Providers, then choose Apollo when creating a Hunt Profile.
+  The key is encrypted at rest and sent only in the `x-api-key` header. Searches map industries,
+  geographies, and employee ranges to Apollo filters, request at most 100 organizations, and
+  consume Apollo credits per page when results are returned. Configure a page-cost estimate if
+  monetary hunt budgets should block calls; SignalForge cannot infer your Apollo plan's price.
+  Start with a low `max_records` value for the first smoke test and confirm the run's provider
+  result before increasing it.
 - **Partial failure is isolated per provider**: each source's `search()` call is wrapped so one
   provider raising doesn't touch another's results — the run ends `partial` (some
   `ProviderResult`s failed, at least one succeeded) rather than `failed` (all of them did).
@@ -310,10 +319,8 @@ issues:
   operations, finance, risk, notifications, saved views, and browser-level end-to-end coverage.
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
-- Any real (non-demo) lead-source, enrichment, or messaging provider — `EmailVerificationAdapter`
-  and `WebsiteAnalysisAdapter` are interfaces only (no implementation, demo or otherwise);
-  `LeadSourceAdapter` and `TechnologyDetectionAdapter` each have one demo implementation
-  proving the seam, not a real one.
+- Real enrichment or messaging providers — `EmailVerificationAdapter` and
+  `WebsiteAnalysisAdapter` are interfaces only (no implementation, demo or otherwise).
 - A production deployment target (reverse proxy, TLS termination, process manager beyond
   `gunicorn`/`celery`) beyond what `config/settings/production.py` and
   `requirements/production.txt` already prepare.

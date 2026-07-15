@@ -12,6 +12,7 @@ from apps.integrations.models import (
     AIEndpoint,
     AIProvider,
     CredentialReference,
+    LeadSourceConfiguration,
     ProviderHealthCheck,
 )
 from apps.opportunities.tests.factories import OpportunityFactory
@@ -155,6 +156,33 @@ def test_provider_workspace_encrypts_and_never_renders_secret(client):
     assert "never-render-this-secret" not in response.content.decode()
     assert "never-render-this-secret" not in credential.encrypted_value
     assert credential.get_secret() == "never-render-this-secret"
+
+
+@override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")
+def test_apollo_configuration_is_workspace_scoped_and_rotates_secret(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    client.force_login(user)
+
+    for secret in ("first-apollo-key", "rotated-apollo-key"):
+        response = client.post(
+            reverse("command_center:configure-apollo"),
+            {
+                "name": "Apollo production",
+                "api_key": secret,
+                "timeout_seconds": 20,
+                "estimated_cost_per_page_cents": 15,
+                "enabled": "on",
+            },
+            follow=True,
+        )
+        assert secret not in response.content.decode()
+
+    configuration = LeadSourceConfiguration.objects.get(workspace=workspace)
+    assert LeadSourceConfiguration.objects.count() == 1
+    assert configuration.credential.get_secret() == "rotated-apollo-key"
+    assert "rotated-apollo-key" not in configuration.credential.encrypted_value
 
 
 def test_endpoint_creation_rejects_cross_workspace_provider(client):

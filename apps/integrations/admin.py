@@ -6,6 +6,7 @@ from .models import (
     AIProvider,
     CredentialReference,
     FallbackPolicy,
+    LeadSourceConfiguration,
     ModelCapability,
     ModelDefinition,
     ModelInvocation,
@@ -59,5 +60,6 @@ for model in (
     PromptVersion,
     ModelInvocation,
     ProviderHealthCheck,
+    LeadSourceConfiguration,
 ):
     admin.site.register(model)

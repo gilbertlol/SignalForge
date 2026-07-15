@@ -11,6 +11,10 @@ def test_get_lead_source_adapter_returns_none_for_unknown_key():
     assert get_lead_source_adapter("does-not-exist") is None
 
 
+def test_apollo_requires_workspace_configuration():
+    assert get_lead_source_adapter("apollo") is None
+
+
 def test_get_technology_detection_adapter_resolves_demo():
     adapter = get_technology_detection_adapter("demo")
     assert isinstance(adapter, DemoTechnologyDetectionAdapter)
