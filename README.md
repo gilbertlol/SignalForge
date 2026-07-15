@@ -234,13 +234,12 @@ Redis → worker wiring; it has no business meaning.
 
 ## Lead discovery, enrichment, and scheduled runs
 
-- **The pipeline** (`apps.discovery.services.execute_run`) runs six phases against a specific
-  `HuntProfileVersion` in order: discover → normalize → deduplicate → enrich → collect evidence
-  → score. It's one resumable orchestrating task, not a multi-task Celery chain — idempotency
-  comes from each phase only touching `SourceRecord`s still at that phase's entry status, so
-  calling it again on an already-completed (or partially-completed) run just finds nothing left
-  to do in the phases that already finished. `POST /api/v1/discovery-runs/` starts one (against
-  a `hunt_profile`'s current version) and runs it via Celery immediately.
+- **The pipeline** fans every enabled source out as an independent Celery task, then runs one
+  durable fan-in: normalize → deduplicate → enrich → collect evidence → score. Execution state
+  and raw payloads live in PostgreSQL while Celery carries stable IDs only. Unique execution and
+  source-record keys make worker retries and duplicate delivery idempotent. One provider failure
+  cannot prevent the remaining tasks or finalization. `POST /api/v1/discovery-runs/` starts the
+  graph against the Hunt Profile's current immutable version.
 - **Providers are looked up by key, never hard-coded** — `apps.integrations.registry` resolves
   a `source_key` string (e.g. `"demo"`) to a concrete adapter. `apps.integrations.providers.demo`
   ships one deterministic `LeadSourceAdapter` and one `TechnologyDetectionAdapter` so the whole

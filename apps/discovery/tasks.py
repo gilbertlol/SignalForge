@@ -1,21 +1,48 @@
 import logging
 
-from celery import shared_task
+from celery import chord, shared_task
 from django.utils import timezone
 
 from apps.hunting.models import HuntProfileStatus, ScheduleFrequency, SchedulePolicy
 
 from .models import DiscoveryRun, DiscoveryRunTrigger
-from .services import execute_run, start_run
+from .services import (
+    execute_provider_search,
+    finalize_run,
+    prepare_provider_executions,
+    start_run,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name="discovery.run_discovery")
+@shared_task(name="discovery.run_discovery", acks_late=True)
 def run_discovery_task(discovery_run_id: str) -> str:
     run = DiscoveryRun.objects.get(id=discovery_run_id)
-    execute_run(run)
+    executions = prepare_provider_executions(run)
+    if not executions:
+        finalize_run(run.id)
+        run.refresh_from_db()
+        return run.status
+
+    header = [run_provider_task.s(str(execution.id)) for execution in executions]
+    chord(header)(finalize_discovery_task.s(str(run.id)))
+    run.refresh_from_db()
     return run.status
+
+
+@shared_task(bind=True, name="discovery.run_provider", acks_late=True, max_retries=3)
+def run_provider_task(self, provider_result_id: str) -> str:
+    execution = execute_provider_search(provider_result_id)
+    if self.request.id and execution.celery_task_id != self.request.id:
+        execution.celery_task_id = self.request.id
+        execution.save(update_fields=["celery_task_id", "updated_at"])
+    return str(execution.id)
+
+
+@shared_task(name="discovery.finalize_run", acks_late=True)
+def finalize_discovery_task(_provider_result_ids: list[str], discovery_run_id: str) -> str:
+    return finalize_run(discovery_run_id).status
 
 
 @shared_task(name="discovery.dispatch_scheduled_discoveries")

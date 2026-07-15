@@ -31,9 +31,17 @@ class SourceRecordStatus(models.TextChoices):
 
 
 class ProviderResultStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    RETRYING = "retrying", "Retrying"
     SUCCEEDED = "succeeded", "Succeeded"
+    EMPTY = "empty", "Empty"
     FAILED = "failed", "Failed"
     PARTIAL = "partial", "Partial"
+    TIMED_OUT = "timed_out", "Timed out"
+    RATE_LIMITED = "rate_limited", "Rate limited"
+    CANCELED = "canceled", "Canceled"
+    BUDGET_BLOCKED = "budget_blocked", "Budget blocked"
 
 
 class EnrichmentRunStatus(models.TextChoices):
@@ -96,6 +104,9 @@ class SourceRecord(BaseModel):
     discovery_run = models.ForeignKey(
         DiscoveryRun, on_delete=models.CASCADE, related_name="source_records"
     )
+    provider_result = models.ForeignKey(
+        "ProviderResult", null=True, blank=True, on_delete=models.CASCADE, related_name="records"
+    )
     source_key = models.CharField(max_length=100)
     external_id = models.CharField(max_length=255, blank=True)
     raw_payload = models.JSONField(default=dict, blank=True)
@@ -111,6 +122,13 @@ class SourceRecord(BaseModel):
     class Meta:
         ordering = ["-created_at"]
         indexes = [models.Index(fields=["discovery_run", "status"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["discovery_run", "source_key", "external_id"],
+                condition=~models.Q(external_id=""),
+                name="source_record_unique_external_id_per_run_source",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.source_key}:{self.external_id or self.id}"
@@ -140,12 +158,27 @@ class ProviderResult(BaseModel):
         DiscoveryRun, on_delete=models.CASCADE, related_name="provider_results"
     )
     provider_key = models.CharField(max_length=100)
-    status = models.CharField(max_length=10, choices=ProviderResultStatus.choices)
+    status = models.CharField(
+        max_length=20, choices=ProviderResultStatus.choices, default=ProviderResultStatus.QUEUED
+    )
+    query_snapshot = models.JSONField(default=dict, blank=True)
+    max_records = models.IntegerField(null=True, blank=True)
+    budget_cents = models.IntegerField(null=True, blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    celery_task_id = models.CharField(max_length=255, blank=True)
     records_returned = models.IntegerField(default=0)
     cost_cents = models.IntegerField(default=0)
     error = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["discovery_run", "provider_key"],
+                name="provider_result_unique_source_per_run",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"{self.provider_key}: {self.status}"

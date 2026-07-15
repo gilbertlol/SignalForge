@@ -7,8 +7,10 @@ from apps.discovery.models import (
 )
 from apps.discovery.services import (
     create_manual_source_record,
+    execute_provider_search,
     execute_run,
     import_csv,
+    prepare_provider_executions,
     start_run,
 )
 from apps.discovery.tests.factories import SuppressionEntryFactory
@@ -72,6 +74,22 @@ def test_rerunning_the_same_run_is_idempotent():
     assert (
         Evidence.objects.filter(workspace=profile.workspace).count() == evidence_count_after_first
     )
+
+
+def test_duplicate_provider_task_delivery_does_not_duplicate_records_or_cost():
+    profile = HuntProfileFactory()
+    version = _version(profile, result_threshold={"min_total_score": 0})
+    run = start_run(version, trigger="manual")
+    execution = prepare_provider_executions(run)[0]
+
+    execute_provider_search(execution.id)
+    execute_provider_search(execution.id)
+
+    execution.refresh_from_db()
+    assert execution.records.count() == 5
+    assert execution.records_returned == 5
+    assert execution.cost_cents == 50
+    assert execution.attempt_count == 1
 
 
 def test_rerunning_the_same_source_via_a_new_run_does_not_duplicate_organizations():

@@ -1,17 +1,20 @@
 """The discover -> normalize -> deduplicate -> enrich -> collect evidence -> score pipeline.
 
-`execute_run` is one resumable orchestrator, not a multi-task Celery chain
-(see apps/discovery/tasks.py) — idempotency comes from each phase only
-touching `SourceRecord`s still at that phase's entry state, so calling it
-again on an already-completed (or partially-completed) run just finds
-nothing left to do in the phases that already finished.
+Celery fans enabled sources out into independent provider tasks and invokes
+one durable fan-in after they reach terminal states. Provider payloads stay
+in PostgreSQL; the broker carries IDs only. `execute_run` retains a synchronous
+compatibility path for tests and direct callers using the same idempotent steps.
 """
 
 import csv
+import hashlib
 import io
+import json
 from dataclasses import dataclass
 from typing import Any
 
+from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from apps.evidence.models import Reliability, SourceType, VerificationStatus
@@ -57,7 +60,7 @@ def start_run(
 
 
 def execute_run(run: DiscoveryRun) -> DiscoveryRun:
-    """Run every phase in order. Safe to call again on the same `run`."""
+    """Synchronous compatibility entry point; Celery uses parallel provider tasks."""
     if run.status in (DiscoveryRunStatus.SUCCEEDED, DiscoveryRunStatus.CANCELED):
         return run
 
@@ -67,20 +70,14 @@ def execute_run(run: DiscoveryRun) -> DiscoveryRun:
     run.save(update_fields=["status", "started_at", "updated_at"])
 
     try:
-        _discover(run)
+        executions = prepare_provider_executions(run)
+        for execution in executions:
+            execute_provider_search(execution.id)
         run.refresh_from_db()
         if run.status == DiscoveryRunStatus.CANCELED:
             return run
 
-        _normalize(run)
-        _deduplicate(run)
-        run.refresh_from_db()
-        if run.status == DiscoveryRunStatus.CANCELED:
-            return run
-
-        _enrich(run)
-        _collect_evidence(run)
-        _score(run)
+        finalize_run(run.id)
     except Exception as exc:  # noqa: BLE001 - isolate unexpected failures, never leave "running" stuck
         run.status = DiscoveryRunStatus.FAILED
         run.error_summary = str(exc)
@@ -89,17 +86,6 @@ def execute_run(run: DiscoveryRun) -> DiscoveryRun:
         raise
 
     run.refresh_from_db()
-    if run.status != DiscoveryRunStatus.CANCELED:
-        has_failed = run.provider_results.filter(status=ProviderResultStatus.FAILED).exists()
-        has_succeeded = run.provider_results.filter(status=ProviderResultStatus.SUCCEEDED).exists()
-        if has_failed and has_succeeded:
-            run.status = DiscoveryRunStatus.PARTIAL
-        elif has_failed and not has_succeeded:
-            run.status = DiscoveryRunStatus.FAILED
-        else:
-            run.status = DiscoveryRunStatus.SUCCEEDED
-        run.finished_at = timezone.now()
-        run.save(update_fields=["status", "finished_at", "updated_at"])
     return run
 
 
@@ -123,7 +109,7 @@ def _get_effective_source_policies(version: HuntProfileVersion) -> list[_Effecti
     ]
 
 
-def _discover(run: DiscoveryRun) -> None:
+def _search_query(run: DiscoveryRun) -> dict[str, Any]:
     version = run.hunt_profile_version
     search_scope = getattr(version, "search_scope", None)
     base_query: dict[str, Any] = {}
@@ -135,85 +121,187 @@ def _discover(run: DiscoveryRun) -> None:
             "company_size_max": search_scope.company_size_max,
         }
 
-    discovered_count = 0
-    cost_total = 0
+    return base_query
+
+
+@transaction.atomic
+def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
+    """Persist the fan-out before dispatch so re-dispatch is idempotent."""
+    run = DiscoveryRun.objects.select_for_update().get(pk=run.pk)
+    if run.status == DiscoveryRunStatus.CANCELED:
+        return []
+    if run.started_at is None:
+        run.started_at = timezone.now()
+    run.status = DiscoveryRunStatus.RUNNING
+    run.save(update_fields=["status", "started_at", "updated_at"])
+
+    base_query = _search_query(run)
+    version = run.hunt_profile_version
+    executions = []
     for policy in _get_effective_source_policies(version):
-        already_ran = run.provider_results.filter(
+        execution, _ = ProviderResult.objects.get_or_create(
+            discovery_run=run,
             provider_key=policy.source_key,
-            status__in=[ProviderResultStatus.SUCCEEDED, ProviderResultStatus.PARTIAL],
-        ).exists()
-        if already_ran:
-            continue
+            defaults={
+                "query_snapshot": {**base_query, "limit": policy.max_records},
+                "max_records": policy.max_records,
+                "budget_cents": policy.budget_cents,
+            },
+        )
+        executions.append(execution)
+    return executions
 
-        started_at = timezone.now()
-        adapter = get_lead_source_adapter(policy.source_key, workspace=run.workspace)
-        if adapter is None:
-            ProviderResult.objects.create(
-                discovery_run=run,
-                provider_key=policy.source_key,
-                status=ProviderResultStatus.FAILED,
-                error=f"No lead source adapter registered for {policy.source_key!r}.",
-                started_at=started_at,
-                finished_at=timezone.now(),
-            )
-            continue
 
-        estimated_search_cost = getattr(adapter, "estimated_search_cost_cents", 0)
-        if policy.budget_cents is not None and estimated_search_cost > policy.budget_cents:
-            ProviderResult.objects.create(
-                discovery_run=run,
-                provider_key=policy.source_key,
-                status=ProviderResultStatus.FAILED,
-                error="Configured provider page cost exceeds this source budget.",
-                started_at=started_at,
-                finished_at=timezone.now(),
-            )
-            continue
+def _payload_external_id(source_key: str, payload: dict[str, Any]) -> str:
+    provider_id = payload.get("id") or payload.get("organization_id")
+    if provider_id:
+        return str(provider_id)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return f"sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
-        try:
-            results = adapter.search({**base_query, "limit": policy.max_records})
-        except Exception as exc:  # noqa: BLE001 - one provider's failure must not sink the run
-            ProviderResult.objects.create(
-                discovery_run=run,
-                provider_key=policy.source_key,
-                status=ProviderResultStatus.FAILED,
-                error=str(exc),
-                started_at=started_at,
-                finished_at=timezone.now(),
-            )
-            continue
 
-        created = 0
-        cost = estimated_search_cost if results else 0
-        record_cost = _MOCK_COST_PER_RECORD_CENTS if policy.source_key == "demo" else 0
-        for payload in results:
-            if policy.budget_cents is not None and cost + record_cost > policy.budget_cents:
-                break
-            SourceRecord.objects.create(
-                discovery_run=run,
-                source_key=policy.source_key,
-                raw_payload=payload,
-                status=SourceRecordStatus.PENDING,
-            )
+def execute_provider_search(provider_result_id) -> ProviderResult:
+    """Execute exactly one source; safe to deliver more than once."""
+    with transaction.atomic():
+        execution = (
+            ProviderResult.objects.select_for_update()
+            .select_related("discovery_run__workspace")
+            .get(pk=provider_result_id)
+        )
+        if execution.status in {
+            ProviderResultStatus.SUCCEEDED,
+            ProviderResultStatus.EMPTY,
+            ProviderResultStatus.PARTIAL,
+            ProviderResultStatus.BUDGET_BLOCKED,
+            ProviderResultStatus.CANCELED,
+        }:
+            return execution
+        if execution.discovery_run.status == DiscoveryRunStatus.CANCELED:
+            execution.status = ProviderResultStatus.CANCELED
+            execution.finished_at = timezone.now()
+            execution.save(update_fields=["status", "finished_at", "updated_at"])
+            return execution
+        execution.status = ProviderResultStatus.RUNNING
+        execution.started_at = execution.started_at or timezone.now()
+        execution.attempt_count += 1
+        execution.error = ""
+        execution.save(
+            update_fields=["status", "started_at", "attempt_count", "error", "updated_at"]
+        )
+
+    run = execution.discovery_run
+    policy = _EffectiveSourcePolicy(
+        execution.provider_key, execution.max_records, execution.budget_cents
+    )
+    adapter = get_lead_source_adapter(policy.source_key, workspace=run.workspace)
+    if adapter is None:
+        return _finish_provider_failure(
+            execution, f"No lead source adapter registered for {policy.source_key!r}."
+        )
+
+    estimated_search_cost = getattr(adapter, "estimated_search_cost_cents", 0)
+    if policy.budget_cents is not None and estimated_search_cost > policy.budget_cents:
+        execution.status = ProviderResultStatus.BUDGET_BLOCKED
+        execution.error = "Configured provider page cost exceeds this source budget."
+        execution.finished_at = timezone.now()
+        execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
+        return execution
+
+    try:
+        results = adapter.search(execution.query_snapshot)
+    except Exception as exc:  # noqa: BLE001 - source failure is persisted and isolated
+        return _finish_provider_failure(execution, str(exc))
+
+    cost = estimated_search_cost if results else 0
+    record_cost = _MOCK_COST_PER_RECORD_CENTS if policy.source_key == "demo" else 0
+    created = 0
+    for payload in results:
+        if policy.budget_cents is not None and cost + record_cost > policy.budget_cents:
+            break
+        _, was_created = SourceRecord.objects.get_or_create(
+            discovery_run=run,
+            source_key=policy.source_key,
+            external_id=_payload_external_id(policy.source_key, payload),
+            defaults={
+                "provider_result": execution,
+                "raw_payload": payload,
+                "status": SourceRecordStatus.PENDING,
+            },
+        )
+        if was_created:
             created += 1
             cost += record_cost
 
-        ProviderResult.objects.create(
-            discovery_run=run,
-            provider_key=policy.source_key,
-            status=ProviderResultStatus.SUCCEEDED,
-            records_returned=created,
-            cost_cents=cost,
-            started_at=started_at,
-            finished_at=timezone.now(),
-        )
-        discovered_count += created
-        cost_total += cost
+    execution.status = ProviderResultStatus.SUCCEEDED if created else ProviderResultStatus.EMPTY
+    execution.records_returned = execution.records.count()
+    execution.cost_cents = cost if execution.records_returned else 0
+    execution.finished_at = timezone.now()
+    execution.save(
+        update_fields=["status", "records_returned", "cost_cents", "finished_at", "updated_at"]
+    )
+    return execution
 
-    if discovered_count or cost_total:
-        run.records_discovered += discovered_count
-        run.cost_cents += cost_total
-        run.save(update_fields=["records_discovered", "cost_cents", "updated_at"])
+
+def _finish_provider_failure(execution: ProviderResult, error: str) -> ProviderResult:
+    execution.status = ProviderResultStatus.FAILED
+    execution.error = error
+    execution.finished_at = timezone.now()
+    execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
+    return execution
+
+
+def finalize_run(discovery_run_id) -> DiscoveryRun:
+    """Idempotent fan-in. Returns early until every provider is terminal."""
+    run = DiscoveryRun.objects.get(pk=discovery_run_id)
+    if run.status == DiscoveryRunStatus.CANCELED:
+        return run
+    active = run.provider_results.filter(
+        status__in=[
+            ProviderResultStatus.QUEUED,
+            ProviderResultStatus.RUNNING,
+            ProviderResultStatus.RETRYING,
+            ProviderResultStatus.RATE_LIMITED,
+        ]
+    ).exists()
+    if active:
+        return run
+
+    totals = run.provider_results.aggregate(records=Sum("records_returned"), cost=Sum("cost_cents"))
+    run.records_discovered = totals["records"] or 0
+    run.cost_cents = totals["cost"] or 0
+    run.save(update_fields=["records_discovered", "cost_cents", "updated_at"])
+
+    _normalize(run)
+    _deduplicate(run)
+    run.refresh_from_db()
+    if run.status == DiscoveryRunStatus.CANCELED:
+        return run
+    _enrich(run)
+    _collect_evidence(run)
+    _score(run)
+
+    successful = run.provider_results.filter(
+        status__in=[ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY]
+    ).exists()
+    failed = run.provider_results.exclude(
+        status__in=[ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY]
+    ).exists()
+    run.status = (
+        DiscoveryRunStatus.PARTIAL
+        if successful and failed
+        else DiscoveryRunStatus.FAILED
+        if failed and not successful
+        else DiscoveryRunStatus.SUCCEEDED
+    )
+    run.finished_at = timezone.now()
+    run.save(update_fields=["status", "finished_at", "updated_at"])
+    return run
+
+
+def _discover(run: DiscoveryRun) -> None:
+    """Deprecated synchronous discovery phase retained for internal compatibility."""
+    for execution in prepare_provider_executions(run):
+        execute_provider_search(execution.id)
 
 
 # --- normalize -----------------------------------------------------------------
