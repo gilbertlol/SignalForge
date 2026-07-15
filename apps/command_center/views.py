@@ -34,6 +34,7 @@ from apps.integrations.models import (
     LeadSourceConfiguration,
     ModelDefinition,
 )
+from apps.integrations.registry import get_lead_source_adapter
 from apps.integrations.services import check_provider
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
@@ -128,9 +129,45 @@ def review_queue(request: HttpRequest) -> HttpResponse:
 
 @workspace_permission("prospects.access")
 def hunt_profiles(request: HttpRequest) -> HttpResponse:
-    profiles = HuntProfile.objects.filter(workspace=get_request_workspace(request)).select_related(
+    workspace = get_request_workspace(request)
+    profiles = HuntProfile.objects.filter(workspace=workspace).select_related(
         "current_version"
-    )
+    ).prefetch_related("current_version__source_policies")
+    for profile in profiles:
+        profile.source_preflight = []
+        if profile.current_version:
+            scope = getattr(profile.current_version, "search_scope", None)
+            all_policies = profile.current_version.source_policies.all()
+            enabled_policies = list(all_policies.filter(is_enabled=True).order_by("priority"))
+            for policy in enabled_policies:
+                adapter = get_lead_source_adapter(policy.source_key, workspace=workspace)
+                requested = {"max_records"}
+                if policy.budget_cents is not None:
+                    requested.add("budget")
+                if scope:
+                    if scope.geographies:
+                        requested.add("geographies")
+                    if scope.industries:
+                        requested.add("industries")
+                    if scope.company_size_min is not None or scope.company_size_max is not None:
+                        requested.add("company_size")
+                unsupported = sorted(requested - getattr(adapter, "capabilities", frozenset()))
+                profile.source_preflight.append(
+                    {
+                        "key": (
+                            f"{policy.source_key} (ignores: {', '.join(unsupported)})"
+                            if unsupported
+                            else policy.source_key
+                        ),
+                        "ready": bool(adapter and adapter.is_configured()),
+                        "records": policy.max_records,
+                        "budget": policy.budget_cents,
+                        "timeout": policy.timeout_seconds,
+                        "retries": policy.max_retries,
+                        "reliability": policy.reliability_weight,
+                        "unsupported": unsupported,
+                    }
+                )
     return _render(
         request,
         "command_center/hunt_profiles.html",
@@ -160,11 +197,20 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
         version = create_version(
             profile,
             criteria={"type": "group", "operator": "AND", "children": [criterion]},
+            search_scope={
+                "geographies": [
+                    value.strip()
+                    for value in form.cleaned_data["geographies"].split(",")
+                    if value.strip()
+                ],
+                "industries": [
+                    value.strip()
+                    for value in form.cleaned_data["industries"].split(",")
+                    if value.strip()
+                ],
+            },
             source_policies=[
-                {
-                    "source_key": form.cleaned_data["lead_source"] or "demo",
-                    "max_records": form.cleaned_data["maximum_records"],
-                }
+                *form.source_policies(),
             ],
             result_threshold={"min_total_score": form.cleaned_data["minimum_score"]},
         )
@@ -201,6 +247,20 @@ def start_discovery(request: HttpRequest, pk) -> HttpResponse:
     if profile.current_version is None:
         messages.error(request, "This Hunt Profile has no version to run.")
         return redirect("command_center:hunt-profiles")
+    all_policies = profile.current_version.source_policies.all()
+    policies = all_policies.filter(is_enabled=True)
+    if not policies.exists():
+        messages.info(request, "This is a manual/CSV-only profile; it has no automatic source to run.")
+        return redirect("command_center:hunt-profiles")
+    for policy in policies:
+        adapter = get_lead_source_adapter(policy.source_key, workspace=profile.workspace)
+        if adapter is None or not adapter.is_configured():
+            messages.error(
+                request,
+                f"Discovery was not started: lead source “{policy.source_key}” is not configured. "
+                "Ask a workspace provider administrator to enable it.",
+            )
+            return redirect("command_center:hunt-profiles")
     run = start_run(
         profile.current_version,
         trigger=DiscoveryRunTrigger.MANUAL,
@@ -332,6 +392,27 @@ def configure_apollo(request: HttpRequest) -> HttpResponse:
             enabled=form.cleaned_data["enabled"],
         )
     messages.success(request, "Apollo configuration saved and API key encrypted.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def test_apollo_connection(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    adapter = get_lead_source_adapter("apollo", workspace=workspace)
+    if adapter is None or not adapter.is_configured():
+        messages.error(request, "Apollo is not configured and enabled for this workspace.")
+        return redirect("command_center:provider-settings")
+
+    try:
+        results = adapter.search({"limit": 1})
+    except Exception as exc:  # noqa: BLE001 - adapters expose sanitized provider errors
+        messages.error(request, f"Apollo connection failed: {exc}")
+    else:
+        messages.success(
+            request,
+            f"Apollo connection passed ({len(results)} validation result(s) returned).",
+        )
     return redirect("command_center:provider-settings")
 
 

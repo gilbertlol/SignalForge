@@ -153,6 +153,7 @@ CSRF_COOKIE_SAMESITE = "Lax"
 SECURE_REFERRER_POLICY = "same-origin"
 X_FRAME_OPTIONS = "DENY"
 SIGNALFORGE_CREDENTIAL_KEY = env.str("SIGNALFORGE_CREDENTIAL_KEY", default=SECRET_KEY)
+TESTING = False
 
 # --- Redis / Celery ---
 REDIS_HOST = env.str("REDIS_HOST", default="localhost")

@@ -15,6 +15,7 @@ class ApolloError(RuntimeError):
 
 class ApolloLeadSourceAdapter(LeadSourceAdapter):
     provider_key = "apollo"
+    capabilities = frozenset({"geographies", "industries", "company_size", "max_records", "budget"})
 
     def __init__(self, configuration):
         self.configuration = configuration

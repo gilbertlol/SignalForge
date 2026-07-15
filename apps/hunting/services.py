@@ -273,8 +273,12 @@ def serialize_source_policies(version: HuntProfileVersion) -> list[dict[str, Any
             "is_enabled": policy.is_enabled,
             "max_records": policy.max_records,
             "budget_cents": policy.budget_cents,
+            "reliability_weight": policy.reliability_weight,
+            "timeout_seconds": policy.timeout_seconds,
+            "max_retries": policy.max_retries,
+            "priority": policy.priority,
         }
-        for policy in version.source_policies.order_by("source_key")
+        for policy in version.source_policies.order_by("priority", "source_key")
     ]
 
 

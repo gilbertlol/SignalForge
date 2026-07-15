@@ -28,7 +28,7 @@ def gateway_fixture(workspace, *, privacy=PrivacyClass.LOCAL_ONLY, response_prov
         workspace=workspace,
         name="Mock",
         provider_key="mock",
-        provider_type=ProviderType.MOCK if response_provider else ProviderType.NATIVE,
+        provider_type="mock" if response_provider else ProviderType.NATIVE,
     )
     endpoint = AIEndpoint.objects.create(
         workspace=workspace,
@@ -180,7 +180,7 @@ def test_api_rejects_cross_workspace_provider_reference():
     membership.permission_grants.add(permission)
     other = Workspace.objects.create(name="Other", slug="other-ai")
     provider = AIProvider.objects.create(
-        workspace=other, name="Foreign", provider_key="foreign", provider_type=ProviderType.MOCK
+        workspace=other, name="Foreign", provider_key="foreign", provider_type="mock"
     )
     client = APIClient()
     client.force_authenticate(user=user)

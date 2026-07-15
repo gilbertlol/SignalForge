@@ -2,6 +2,7 @@ from .base import *  # noqa: F403
 from .base import env
 
 DEBUG = False
+TESTING = True
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 
 SECRET_KEY = env.str("DJANGO_SECRET_KEY", default="test-secret-key-not-for-prod")

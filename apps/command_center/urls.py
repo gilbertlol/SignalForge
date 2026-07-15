@@ -17,6 +17,11 @@ urlpatterns = [
     path("settings/providers/new/", views.create_provider, name="create-provider"),
     path("settings/credentials/new/", views.create_credential, name="create-credential"),
     path("settings/lead-sources/apollo/", views.configure_apollo, name="configure-apollo"),
+    path(
+        "settings/lead-sources/apollo/test/",
+        views.test_apollo_connection,
+        name="test-apollo",
+    ),
     path("settings/endpoints/new/", views.create_endpoint, name="create-endpoint"),
     path("settings/models/new/", views.create_model, name="create-model"),
     path(

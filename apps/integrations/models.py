@@ -10,7 +10,6 @@ class ProviderType(models.TextChoices):
     LOCAL_OPENAI = "local_openai", "Local OpenAI compatible"
     CLOUD_OPENAI = "cloud_openai", "Cloud OpenAI compatible"
     NATIVE = "native", "Native provider"
-    MOCK = "mock", "Mock"
 
 
 class PrivacyClass(models.TextChoices):

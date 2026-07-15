@@ -8,6 +8,7 @@ from apps.accounts.models import AccessPermission
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Workspace
 from apps.hunting.models import HuntProfile
+from apps.hunting.services import create_version
 from apps.integrations.models import (
     AIEndpoint,
     AIProvider,
@@ -86,7 +87,9 @@ def test_create_hunt_profile_builds_version_and_activates(client):
             "description": "Local automation agencies",
             "require_domain": "on",
             "minimum_score": 12,
-            "maximum_records": 20,
+                "use_openstreetmap": "on",
+                "openstreetmap_max_records": 20,
+                "geographies": "Toronto",
             "activate_now": "on",
         },
     )
@@ -104,7 +107,7 @@ def test_start_discovery_dispatches_workspace_scoped_run(mock_delay, client):
     client.force_login(user)
     client.post(
         reverse("command_center:create-hunt-profile"),
-        {"name": "Runnable", "minimum_score": 1, "maximum_records": 5},
+        {"name": "Runnable", "minimum_score": 1, "use_openstreetmap": "on", "openstreetmap_max_records": 5, "geographies": "Toronto"},
     )
     profile = HuntProfile.objects.get(name="Runnable")
 
@@ -114,6 +117,95 @@ def test_start_discovery_dispatches_workspace_scoped_run(mock_delay, client):
     run = profile.current_version.discovery_runs.get()
     assert run.workspace == user.memberships.get().workspace
     mock_delay.assert_called_once_with(str(run.id))
+
+
+@patch("apps.command_center.views.run_discovery_task.delay")
+def test_profile_without_source_policies_is_not_runnable(mock_delay, client):
+    user = UserFactory()
+    profile = HuntProfile.objects.create(workspace=user.memberships.get().workspace, name="Legacy")
+    version = create_version(
+        profile,
+        criteria={
+            "type": "group",
+            "operator": "AND",
+            "children": [
+                {
+                    "type": "criterion",
+                    "category": "custom_attribute",
+                    "field": "domain",
+                    "op": "neq",
+                    "value": "",
+                    "weight": 1,
+                }
+            ],
+        },
+    )
+    profile.current_version = version
+    profile.save(update_fields=["current_version", "updated_at"])
+    client.force_login(user)
+
+    page = client.get(reverse("command_center:hunt-profiles"))
+    response = client.post(reverse("command_center:start-discovery", kwargs={"pk": profile.pk}))
+
+    assert b"Manual/CSV only" in page.content
+    assert response.status_code == 302
+    assert not version.discovery_runs.exists()
+    mock_delay.assert_not_called()
+
+
+@patch("apps.command_center.views.run_discovery_task.delay")
+def test_start_discovery_rejects_unconfigured_live_source(mock_delay, client):
+    user = UserFactory()
+    client.force_login(user)
+    client.post(
+        reverse("command_center:create-hunt-profile"),
+        {
+            "name": "Needs Apollo",
+            "minimum_score": 1,
+            "use_apollo": "on",
+            "apollo_max_records": 5,
+        },
+    )
+    profile = HuntProfile.objects.get(name="Needs Apollo")
+
+    response = client.post(
+        reverse("command_center:start-discovery", kwargs={"pk": profile.pk}), follow=True
+    )
+
+    assert response.status_code == 200
+    assert b"Apollo" in response.content
+    assert not profile.current_version.discovery_runs.exists()
+    mock_delay.assert_not_called()
+
+
+def test_create_hunt_profile_persists_independent_multi_source_policies(client):
+    user = UserFactory()
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:create-hunt-profile"),
+        {
+            "name": "Toronto professionals",
+            "minimum_score": 1,
+            "geographies": "Toronto, Ontario",
+            "industries": "accountant, consultant",
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 30,
+            "openstreetmap_budget_cents": 0,
+            "use_apollo": "on",
+            "apollo_max_records": 5,
+            "apollo_budget_cents": 25,
+        },
+    )
+
+    assert response.status_code == 302
+    version = HuntProfile.objects.get(name="Toronto professionals").current_version
+    policies = {policy.source_key: policy for policy in version.source_policies.all()}
+    assert policies["openstreetmap"].max_records == 30
+    assert policies["openstreetmap"].budget_cents == 0
+    assert policies["apollo"].max_records == 5
+    assert policies["apollo"].budget_cents == 25
+    assert version.search_scope.geographies == ["Toronto", "Ontario"]
 
 
 def test_pipeline_status_transition_is_workspace_scoped(client):
@@ -183,6 +275,22 @@ def test_apollo_configuration_is_workspace_scoped_and_rotates_secret(client):
     assert LeadSourceConfiguration.objects.count() == 1
     assert configuration.credential.get_secret() == "rotated-apollo-key"
     assert "rotated-apollo-key" not in configuration.credential.encrypted_value
+
+
+@patch("apps.command_center.views.get_lead_source_adapter")
+def test_apollo_live_validation_reports_success(mock_get_adapter, client):
+    user = UserFactory()
+    grant_provider_management(user)
+    client.force_login(user)
+    adapter = mock_get_adapter.return_value
+    adapter.is_configured.return_value = True
+    adapter.search.return_value = [{"id": "sample"}]
+
+    response = client.post(reverse("command_center:test-apollo"), follow=True)
+
+    assert response.status_code == 200
+    assert b"Apollo connection passed" in response.content
+    adapter.search.assert_called_once_with({"limit": 1})
 
 
 def test_endpoint_creation_rejects_cross_workspace_provider(client):

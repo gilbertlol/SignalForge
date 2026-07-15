@@ -235,6 +235,10 @@ class SourcePolicy(BaseModel):
     is_enabled = models.BooleanField(default=True)
     max_records = models.IntegerField(null=True, blank=True)
     budget_cents = models.IntegerField(null=True, blank=True)
+    reliability_weight = models.PositiveSmallIntegerField(default=50)
+    timeout_seconds = models.PositiveIntegerField(default=30)
+    max_retries = models.PositiveSmallIntegerField(default=2)
+    priority = models.PositiveSmallIntegerField(default=100)
 
     class Meta:
         constraints = [

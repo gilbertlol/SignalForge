@@ -25,18 +25,37 @@ def run_discovery_task(discovery_run_id: str) -> str:
         run.refresh_from_db()
         return run.status
 
-    header = [run_provider_task.s(str(execution.id)) for execution in executions]
+    policies = {p.source_key: p for p in run.hunt_profile_version.source_policies.filter(is_enabled=True)}
+    header = []
+    for execution in executions:
+        policy = policies.get(execution.provider_key)
+        signature = run_provider_task.s(str(execution.id))
+        if policy:
+            signature = signature.set(
+                soft_time_limit=policy.timeout_seconds,
+                time_limit=policy.timeout_seconds + 5,
+                priority=max(0, min(9, 9 - min(policy.priority, 9))),
+            )
+        header.append(signature)
     chord(header)(finalize_discovery_task.s(str(run.id)))
     run.refresh_from_db()
     return run.status
 
 
-@shared_task(bind=True, name="discovery.run_provider", acks_late=True, max_retries=3)
+@shared_task(bind=True, name="discovery.run_provider", acks_late=True, max_retries=10)
 def run_provider_task(self, provider_result_id: str) -> str:
     execution = execute_provider_search(provider_result_id)
     if self.request.id and execution.celery_task_id != self.request.id:
         execution.celery_task_id = self.request.id
         execution.save(update_fields=["celery_task_id", "updated_at"])
+    policy = execution.discovery_run.hunt_profile_version.source_policies.filter(
+        source_key=execution.provider_key, is_enabled=True
+    ).first()
+    if execution.status == "failed" and policy and execution.attempt_count <= policy.max_retries:
+        raise self.retry(
+            countdown=min(60, 2 ** execution.attempt_count),
+            max_retries=policy.max_retries,
+        )
     return str(execution.id)
 
 

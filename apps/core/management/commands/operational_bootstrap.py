@@ -10,10 +10,10 @@ from apps.core.services import get_default_workspace
 
 
 class Command(BaseCommand):
-    help = "Idempotently initialize workspace, roles, owner access, and example hunt profiles."
+    help = "Idempotently initialize workspace, roles, and owner access."
 
     def add_arguments(self, parser):
-        parser.add_argument("--skip-examples", action="store_true")
+        parser.add_argument("--with-examples", action="store_true")
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -40,6 +40,6 @@ class Command(BaseCommand):
                         "or create a superuser"
                     )
                 )
-        if not options["skip_examples"]:
+        if options["with_examples"]:
             call_command("seed_hunt_profile_examples")
         self.stdout.write(self.style.SUCCESS(f"Operational bootstrap complete: {workspace.slug}"))

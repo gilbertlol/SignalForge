@@ -14,7 +14,7 @@ class Channel(models.TextChoices):
 class ChannelAccount(WorkspaceScopedModel):
     name = models.CharField(max_length=255)
     channel = models.CharField(max_length=20, choices=Channel.choices)
-    provider_key = models.SlugField(max_length=100, default="mock")
+    provider_key = models.SlugField(max_length=100)
     address = models.CharField(max_length=320)
     enabled = models.BooleanField(default=True)
     config = models.JSONField(default=dict, blank=True)

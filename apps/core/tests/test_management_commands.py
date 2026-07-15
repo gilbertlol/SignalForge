@@ -30,14 +30,14 @@ def test_operational_bootstrap_is_idempotent_and_attaches_existing_superuser():
     workspace = Workspace.objects.get(slug=DEFAULT_WORKSPACE_SLUG)
     membership = Membership.objects.get(workspace=workspace, user=owner)
     assert membership.roles.filter(name="Owner").exists()
-    assert HuntProfile.objects.filter(workspace=workspace).count() == 4
+    assert HuntProfile.objects.filter(workspace=workspace).count() == 0
 
 
 @patch("apps.core.management.commands.operational_check.redis.Redis.from_url")
 def test_operational_check_passes_after_bootstrap(mock_redis, capsys):
     mock_redis.return_value.ping.return_value = True
     User.objects.create_superuser(email="owner@example.com", password="safe-password")
-    call_command("operational_bootstrap", skip_examples=True)
+    call_command("operational_bootstrap")
 
     call_command("operational_check")
 

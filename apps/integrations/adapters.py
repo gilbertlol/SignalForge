@@ -22,6 +22,7 @@ class ProviderAdapter(ABC):
 
 
 class LeadSourceAdapter(ProviderAdapter):
+    capabilities: frozenset[str] = frozenset()
     """Searches an external source for prospect signals."""
 
     @abstractmethod

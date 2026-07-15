@@ -22,6 +22,7 @@ _DEMO_COMPANIES: list[dict[str, Any]] = [
 
 class DemoLeadSourceAdapter(LeadSourceAdapter):
     provider_key = "demo"
+    capabilities = frozenset({"max_records", "budget"})
 
     def is_configured(self) -> bool:
         return True

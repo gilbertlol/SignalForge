@@ -53,8 +53,9 @@ does not yet contain a command-center frontend or real external providers; see
 - A minimal `AuditLogEntry` model and `record()` service (`apps.audit`) — a base for future
   auditing, not the complete audit system.
 - A `ProviderAdapter` interface seam (`apps.integrations.adapters`) for lead sources,
-  messaging providers, and AI models, including Apollo Organization Search as the first
-  production lead source.
+  messaging providers, and AI models, including OpenStreetMap/Overpass and Apollo discovery.
+  Public website enrichment fetches bounded HTML from public IPs and records observed metadata
+  and technology signatures; synthetic adapters are registered only under test settings.
 - PostgreSQL, Redis, Celery, and Celery Beat, all orchestrated through Docker Compose.
 - `/health/live` and `/health/ready` endpoints.
 - Structured JSON application logging.
@@ -251,9 +252,8 @@ Redis → worker wiring; it has no business meaning.
   pipeline is exercisable without any real credentials; `SourcePolicy.source_key` (from
   GOR-242) is what a `HuntProfileVersion` uses to configure which sources run, with
   `max_records`/`budget_cents` enforced per source. A version with no `SourcePolicy` rows at
-  all falls back to the demo source; a version with an explicit
-  `[{"source_key": "demo", "is_enabled": false}]` runs no automatic discovery at all
-  (manual entry / CSV import only) — that distinction is deliberate, not an oversight.
+  production never invents a fallback source. A version with no enabled source policy is
+  manual/CSV-only and cannot launch an automatic discovery run.
 - **Apollo Organization Search** is available with `source_key="apollo"`. Store or rotate its
   API key under Command center → Providers, then choose Apollo when creating a Hunt Profile.
   The key is encrypted at rest and sent only in the `x-api-key` header. Searches map industries,
@@ -285,8 +285,8 @@ Redis → worker wiring; it has no business meaning.
   is_enabled=True)` for active profiles that haven't had a scheduled run yet today — not
   `django-celery-beat`'s dynamic per-profile scheduling, which would be a new dependency for
   what one query already does.
-- **Not built** (see [Deferred work](#deferred-work)): real (non-demo) provider adapters, a
-  generic rate-limiter (the demo adapter needs none), and hard Celery-level task cancellation
+- **Not built** (see [Deferred work](#deferred-work)): a generic cross-provider rate limiter and
+  hard Celery-level task cancellation
   (`cancel` is cooperative — checked between phases, not a kill signal).
 
 ## Configuration
@@ -327,8 +327,8 @@ issues:
   operations, finance, risk, notifications, saved views, and browser-level end-to-end coverage.
 - Fuzzy/near-duplicate resolution for organizations and contacts — dedup today is exact-match
   on normalized domain/email only.
-- Real enrichment or messaging providers — `EmailVerificationAdapter` and
-  `WebsiteAnalysisAdapter` are interfaces only (no implementation, demo or otherwise).
+- Real email verification and messaging providers remain unconfigured. Public website analysis
+  is implemented; unavailable outbound providers fail closed rather than simulating delivery.
 - A production deployment target (reverse proxy, TLS termination, process manager beyond
   `gunicorn`/`celery`) beyond what `config/settings/production.py` and
   `requirements/production.txt` already prepare.

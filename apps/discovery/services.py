@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
+from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -21,7 +22,11 @@ from apps.evidence.models import Reliability, SourceType, VerificationStatus
 from apps.evidence.services import record_evidence, record_organization_claims
 from apps.hunting.models import HuntProfileVersion
 from apps.hunting.services import evaluate_candidate
-from apps.integrations.registry import get_lead_source_adapter, get_technology_detection_adapter
+from apps.integrations.registry import (
+    get_lead_source_adapter,
+    get_technology_detection_adapter,
+    get_website_analysis_adapter,
+)
 from apps.organizations.services import create_organization, normalize_domain
 from apps.scoring.models import ScoreFamily
 from apps.scoring.services import evaluate
@@ -37,9 +42,6 @@ from .models import (
     SourceRecordStatus,
     SuppressionEntry,
 )
-
-_MOCK_COST_PER_RECORD_CENTS = 10
-
 
 @dataclass
 class _EffectiveSourcePolicy:
@@ -93,19 +95,16 @@ def execute_run(run: DiscoveryRun) -> DiscoveryRun:
 
 
 def _get_effective_source_policies(version: HuntProfileVersion) -> list[_EffectiveSourcePolicy]:
-    """Falls back to a single "demo" source only when the version has **no**
-    `SourcePolicy` rows at all — not merely none enabled. That distinction
-    matters: it's what lets a version explicitly configure `[{"source_key":
-    "demo", "is_enabled": False}]` to disable automatic discovery entirely
-    (manual entry / CSV import only) rather than silently falling back to
-    the demo source anyway.
+    """Return enabled immutable policies; production never invents a source.
+
+    Tests retain an isolated deterministic adapter to exercise orchestration.
     """
     all_policies = version.source_policies.all()
     if not all_policies.exists():
-        return [_EffectiveSourcePolicy("demo", None, None)]
+        return [_EffectiveSourcePolicy("demo", None, None)] if settings.TESTING else []
     return [
         _EffectiveSourcePolicy(p.source_key, p.max_records, p.budget_cents)
-        for p in all_policies.filter(is_enabled=True)
+        for p in all_policies.filter(is_enabled=True).order_by("priority", "source_key")
     ]
 
 
@@ -213,7 +212,7 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         return _finish_provider_failure(execution, str(exc))
 
     cost = estimated_search_cost if results else 0
-    record_cost = _MOCK_COST_PER_RECORD_CENTS if policy.source_key == "demo" else 0
+    record_cost = 10 if settings.TESTING and policy.source_key == "demo" else 0
     created = 0
     for payload in results:
         if policy.budget_cents is not None and cost + record_cost > policy.budget_cents:
@@ -409,27 +408,36 @@ def _records_ready_for(run: DiscoveryRun) -> Any:
 def _enrich(run: DiscoveryRun) -> None:
     enriched_count = 0
     for record in _records_ready_for(run):
-        if EnrichmentRun.objects.filter(source_record=record, provider_key="demo").exists():
+        provider_key = "demo" if settings.TESTING else "public_website"
+        if EnrichmentRun.objects.filter(source_record=record, provider_key=provider_key).exists():
             continue
         domain = record.normalized_data.get("domain", "")
-        adapter = get_technology_detection_adapter("demo")
+        adapter = (
+            get_technology_detection_adapter("demo")
+            if settings.TESTING
+            else get_website_analysis_adapter("public_website")
+        )
         if adapter is None or not domain:
             continue
         try:
-            technologies = adapter.detect(domain)
+            analysis = (
+                {"technologies": adapter.detect(domain)}
+                if settings.TESTING
+                else adapter.analyze(domain)
+            )
         except Exception as exc:  # noqa: BLE001 - enrichment is best-effort, never fails the record
             EnrichmentRun.objects.create(
                 source_record=record,
-                provider_key="demo",
+                provider_key=provider_key,
                 status=EnrichmentRunStatus.FAILED,
                 error=str(exc),
             )
             continue
         EnrichmentRun.objects.create(
             source_record=record,
-            provider_key="demo",
+            provider_key=provider_key,
             status=EnrichmentRunStatus.SUCCEEDED,
-            result={"technologies": technologies},
+            result=analysis,
         )
         enriched_count += 1
 
@@ -446,10 +454,10 @@ def _collect_evidence(run: DiscoveryRun) -> None:
         org = record.organization
         domain = record.normalized_data.get("domain", "")
         name = record.normalized_data.get("name", "")
-        source_type = SourceType.MANUAL if record.source_key != "demo" else SourceType.WEBSITE
+        source_type = SourceType.OTHER
         record_evidence(
             org,
-            source_url=f"https://{domain}" if domain else "",
+            source_url=record.raw_payload.get("source_url") or (f"https://{domain}" if domain else ""),
             source_type=source_type,
             observed_date=timezone.now().date(),
             excerpt=f"Discovered via {record.source_key} ({name})",

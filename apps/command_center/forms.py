@@ -10,13 +10,59 @@ class HuntProfileForm(forms.Form):
     description = forms.CharField(widget=forms.Textarea, required=False)
     require_domain = forms.BooleanField(required=False, initial=True)
     minimum_score = forms.IntegerField(min_value=0, initial=10)
-    maximum_records = forms.IntegerField(min_value=1, max_value=1000, initial=25)
-    lead_source = forms.ChoiceField(
-        choices=[("demo", "Demo data"), ("apollo", "Apollo Organization Search")],
+    geographies = forms.CharField(
         required=False,
-        initial="demo",
+        help_text="Comma-separated cities, regions, or countries (required for OpenStreetMap).",
     )
+    industries = forms.CharField(
+        required=False,
+        help_text="Comma-separated niche/category keywords, for example dentist, accountant.",
+    )
+    use_openstreetmap = forms.BooleanField(required=False, initial=True, label="OpenStreetMap businesses")
+    openstreetmap_max_records = forms.IntegerField(min_value=1, max_value=100, initial=25, required=False)
+    openstreetmap_budget_cents = forms.IntegerField(min_value=0, required=False)
+    use_apollo = forms.BooleanField(required=False, label="Apollo Organization Search")
+    apollo_max_records = forms.IntegerField(min_value=1, max_value=100, initial=10, required=False)
+    apollo_budget_cents = forms.IntegerField(min_value=0, required=False)
+    manual_only = forms.BooleanField(required=False, label="Manual/CSV only (no automatic source)")
+    reliability_weight = forms.IntegerField(min_value=0, max_value=100, initial=50, required=False)
+    timeout_seconds = forms.IntegerField(min_value=5, max_value=300, initial=30, required=False)
+    max_retries = forms.IntegerField(min_value=0, max_value=10, initial=2, required=False)
     activate_now = forms.BooleanField(required=False, initial=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        selected = any(cleaned.get(key) for key in ("use_openstreetmap", "use_apollo"))
+        if cleaned.get("manual_only") and selected:
+            self.add_error("manual_only", "Manual-only profiles cannot enable automatic sources.")
+        elif not cleaned.get("manual_only") and not selected:
+            raise forms.ValidationError("Select at least one source or choose manual/CSV only.")
+        if cleaned.get("use_openstreetmap") and not cleaned.get("geographies"):
+            self.add_error("geographies", "Add at least one geography for OpenStreetMap.")
+        for key in ("openstreetmap", "apollo"):
+            if cleaned.get(f"use_{key}") and not cleaned.get(f"{key}_max_records"):
+                self.add_error(f"{key}_max_records", "Set a record limit for this source.")
+        return cleaned
+
+    def source_policies(self):
+        policies = []
+        for key in ("openstreetmap", "apollo"):
+            if self.cleaned_data.get(f"use_{key}"):
+                policy = {
+                    "source_key": key,
+                    "max_records": self.cleaned_data[f"{key}_max_records"],
+                    "reliability_weight": self.cleaned_data.get("reliability_weight") or 50,
+                    "timeout_seconds": self.cleaned_data.get("timeout_seconds") or 30,
+                    "max_retries": 2 if self.cleaned_data.get("max_retries") is None else self.cleaned_data["max_retries"],
+                    "priority": len(policies) + 1,
+                }
+                budget = self.cleaned_data.get(f"{key}_budget_cents")
+                if budget is not None:
+                    policy["budget_cents"] = budget
+                policies.append(policy)
+        if self.cleaned_data.get("manual_only"):
+            policies.append({"source_key": "manual", "is_enabled": False})
+        return policies
 
 
 class ProfileActionForm(forms.Form):

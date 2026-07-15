@@ -117,7 +117,7 @@ def test_finalize_waits_until_every_source_is_terminal():
 def test_run_discovery_fans_out_one_signature_per_source(mock_chord):
     profile = _active_profile_with_daily_schedule()
     version = profile.current_version
-    version.source_policies.create(source_key="demo")
+    version.source_policies.create(source_key="demo", timeout_seconds=17, priority=1)
     version.source_policies.create(source_key="unknown-second-source")
     run = start_run(version, trigger=DiscoveryRunTrigger.MANUAL)
 
@@ -126,4 +126,10 @@ def test_run_discovery_fans_out_one_signature_per_source(mock_chord):
     header = mock_chord.call_args.args[0]
     assert len(header) == 2
     assert {signature.task for signature in header} == {"discovery.run_provider"}
+    demo_signature = next(
+        signature for signature in header if signature.options["soft_time_limit"] == 17
+    )
+    assert demo_signature.options["soft_time_limit"] == 17
+    assert demo_signature.options["time_limit"] == 22
+    assert demo_signature.options["priority"] == 8
     assert run.provider_results.count() == 2
