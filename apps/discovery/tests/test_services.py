@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 
 from apps.discovery.models import (
@@ -14,7 +16,7 @@ from apps.discovery.services import (
     start_run,
 )
 from apps.discovery.tests.factories import SuppressionEntryFactory
-from apps.evidence.models import Evidence
+from apps.evidence.models import Evidence, OrganizationClaim, OrganizationFieldResolution
 from apps.hunting.services import create_version
 from apps.hunting.tests.factories import HuntProfileFactory
 from apps.organizations.models import Organization
@@ -180,6 +182,65 @@ def test_partial_provider_failure_does_not_corrupt_the_run():
     assert run.provider_results.filter(status=ProviderResultStatus.FAILED).count() == 1
     # the working source's records were still fully processed
     assert run.source_records.filter(status=SourceRecordStatus.QUALIFIED).count() == 5
+
+
+def test_multiple_sources_merge_with_claim_provenance_and_conflicts():
+    class Adapter:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def search(self, _query):
+            return [self.payload]
+
+    profile = HuntProfileFactory()
+    version = _version(
+        profile,
+        source_policies=[{"source_key": "source-a"}, {"source_key": "source-b"}],
+        result_threshold={"min_total_score": 0},
+    )
+    run = start_run(version, trigger="manual")
+    adapters = {
+        "source-a": Adapter(
+            {
+                "id": "a-1",
+                "name": "Acme Automation",
+                "domain": "acme.test",
+                "industry": "automation",
+                "estimated_num_employees": 20,
+            }
+        ),
+        "source-b": Adapter(
+            {
+                "id": "b-9",
+                "name": "Acme Automation Inc.",
+                "domain": "https://www.acme.test/",
+                "industry": "industrial automation",
+                "estimated_num_employees": 20,
+            }
+        ),
+    }
+
+    with patch(
+        "apps.discovery.services.get_lead_source_adapter",
+        side_effect=lambda key, **_kwargs: adapters[key],
+    ):
+        execute_run(run)
+
+    organization = Organization.objects.get(workspace=profile.workspace, domain="acme.test")
+    assert run.source_records.count() == 2
+    assert OrganizationClaim.objects.filter(organization=organization).count() == 10
+    assert organization.external_ids == {"source-a": "a-1", "source-b": "b-9"}
+
+    headcount = OrganizationFieldResolution.objects.get(
+        organization=organization, field_name="employee_count"
+    )
+    industry = OrganizationFieldResolution.objects.get(
+        organization=organization, field_name="industry"
+    )
+    assert headcount.corroboration_count == 2
+    assert headcount.has_conflict is False
+    assert industry.distinct_value_count == 2
+    assert industry.has_conflict is True
 
 
 def test_suppressed_domain_blocks_organization_creation():

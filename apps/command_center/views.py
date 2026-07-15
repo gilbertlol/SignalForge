@@ -440,6 +440,8 @@ def organization_detail(request: HttpRequest, pk) -> HttpResponse:
             "contacts": organization.contacts.all(),
             "opportunities": opportunities,
             "conversations": conversations,
+            "claims": organization.source_claims.select_related("source_record").all(),
+            "resolutions": organization.field_resolutions.select_related("selected_claim").all(),
         },
     )
 

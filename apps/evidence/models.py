@@ -93,3 +93,60 @@ class Evidence(BaseModel):
     def save(self, *args, **kwargs):
         self.clean()
         super().save(*args, **kwargs)
+
+
+class OrganizationClaim(BaseModel):
+    """Immutable normalized field value asserted by one discovery record."""
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.PROTECT, related_name="+")
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="source_claims"
+    )
+    source_record = models.ForeignKey(
+        "discovery.SourceRecord", on_delete=models.PROTECT, related_name="claims"
+    )
+    source_key = models.CharField(max_length=100)
+    field_name = models.CharField(max_length=100)
+    value = models.JSONField()
+    normalized_value = models.TextField()
+    reliability = models.CharField(
+        max_length=10, choices=Reliability.choices, default=Reliability.MEDIUM
+    )
+    observed_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["field_name", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_record", "field_name"],
+                name="organization_claim_unique_record_field",
+            )
+        ]
+        indexes = [models.Index(fields=["organization", "field_name"])]
+
+
+class OrganizationFieldResolution(BaseModel):
+    """Explainable current choice among an organization's immutable claims."""
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.PROTECT, related_name="+")
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="field_resolutions"
+    )
+    field_name = models.CharField(max_length=100)
+    selected_claim = models.ForeignKey(
+        OrganizationClaim, on_delete=models.PROTECT, related_name="selected_by"
+    )
+    corroboration_count = models.PositiveIntegerField(default=1)
+    distinct_value_count = models.PositiveIntegerField(default=1)
+    has_conflict = models.BooleanField(default=False)
+    explanation = models.TextField(blank=True)
+    resolved_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["field_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "field_name"],
+                name="organization_resolution_unique_field",
+            )
+        ]

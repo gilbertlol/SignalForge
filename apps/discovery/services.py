@@ -18,7 +18,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.evidence.models import Reliability, SourceType, VerificationStatus
-from apps.evidence.services import record_evidence
+from apps.evidence.services import record_evidence, record_organization_claims
 from apps.hunting.models import HuntProfileVersion
 from apps.hunting.services import evaluate_candidate
 from apps.integrations.registry import get_lead_source_adapter, get_technology_detection_adapter
@@ -383,6 +383,12 @@ def _deduplicate(run: DiscoveryRun) -> None:
             record.status = SourceRecordStatus.DUPLICATE
             deduplicated_count += 1
         record.save(update_fields=["organization", "status", "updated_at"])
+        if external_ids:
+            merged_external_ids = {**org.external_ids, **external_ids}
+            if merged_external_ids != org.external_ids:
+                org.external_ids = merged_external_ids
+                org.save(update_fields=["external_ids", "updated_at"])
+        record_organization_claims(record)
 
     if deduplicated_count:
         run.records_deduplicated += deduplicated_count

@@ -180,6 +180,11 @@ Redis → worker wiring; it has no business meaning.
   `POST /api/v1/opportunities/{id}/evidence/`. Freshness is never stored as a field (a static
   "freshness" value goes stale the moment time passes) — it's the `age_days` computed
   property, read live by the scoring engine.
+- **Source claims** preserve each provider's normalized field assertions separately from the
+  selected organization value. Every claim links back to its immutable raw `SourceRecord` and
+  provider execution. Per-field resolutions select by reliability and freshness while retaining
+  alternatives, corroboration counts, conflicts, and an explanation. Organization responses
+  summarize attribution; `GET /api/v1/organizations/{id}/provenance/` returns full detail.
 - **Scoring** (`apps/scoring`) evaluates configurable `ScoringRule`s against a subject
   (and its evidence) to produce an immutable `ScoreSnapshot` for one of three families:
   `prospect_quality`, `score_confidence`, `opportunity_score`. A matched hard-disqualifier
@@ -264,6 +269,10 @@ Redis → worker wiring; it has no business meaning.
   reinventing one — re-running the same source, even from a brand-new `DiscoveryRun`, resolves
   to the same Organizations. `SuppressionEntry` (a domain blocklist, deactivate rather than
   delete to explicitly allow rediscovery again) is checked first and blocks org creation.
+- **Multi-source merges retain provenance**: matching domains resolve to one Organization, but
+  each source's raw record, external ID, normalized claims, and conflicting values remain
+  independently queryable. The organization page shows selected sources, corroboration, and
+  conflicts rather than flattening provider data into an unexplained value.
 - **Manual entry and CSV import**: `POST /api/v1/discovery-runs/{id}/source-records/manual/`
   and `POST .../source-records/import-csv/` (multipart) both feed the same pipeline from
   `normalize`/`deduplicate` onward — they're just different ways candidates enter it.
