@@ -1,6 +1,7 @@
 """Self-hosted SearXNG web discovery adapter."""
 
 import json
+import math
 from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -28,8 +29,44 @@ class SearXNGLeadSourceAdapter(LeadSourceAdapter):
         if not self.is_configured():
             raise SearXNGError("SearXNG is not enabled for this workspace.")
         limit = min(max(int(query.get("limit") or 10), 1), 50)
-        search_query = self._build_query(query)
         endpoint = self._search_endpoint(self.configuration.base_url)
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "SignalForge/1.0 (workspace web discovery)",
+        }
+        if self.configuration.credential_id:
+            headers["Authorization"] = f"Bearer {self.configuration.credential.get_secret()}"
+        queries = [
+            str(value).strip()[:200]
+            for value in query.get("research_queries", [])[:5]
+            if str(value).strip() and "://" not in str(value)
+        ] or [self._build_query(query)]
+        per_query_limit = math.ceil(limit / len(queries))
+        retrieved_at = datetime.now(UTC).isoformat()
+        results = []
+        seen_urls = set()
+        for search_query in queries:
+            payload = self._request(endpoint, search_query, headers)
+            raw_results = payload.get("results", [])
+            if not isinstance(raw_results, list):
+                raise SearXNGError("SearXNG returned an invalid response.")
+            added = 0
+            for rank, item in enumerate(raw_results, start=1):
+                if not isinstance(item, dict) or not item.get("url"):
+                    continue
+                if item["url"] in seen_urls:
+                    continue
+                seen_urls.add(item["url"])
+                results.append(self._normalize(item, search_query, rank, retrieved_at))
+                added += 1
+                if added >= per_query_limit or len(results) >= limit:
+                    break
+            if len(results) >= limit:
+                break
+        self.last_search_cost_cents = 0
+        return results
+
+    def _request(self, endpoint, search_query, headers):
         params = urlencode(
             {
                 "q": search_query,
@@ -38,16 +75,10 @@ class SearXNGLeadSourceAdapter(LeadSourceAdapter):
                 "safesearch": 1,
             }
         )
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "SignalForge/1.0 (workspace web discovery)",
-        }
-        if self.configuration.credential_id:
-            headers["Authorization"] = f"Bearer {self.configuration.credential.get_secret()}"
         request = Request(f"{endpoint}?{params}", headers=headers)
         try:
             with urlopen(request, timeout=self.configuration.timeout_seconds) as response:  # noqa: S310
-                payload = json.load(response)
+                return json.load(response)
         except HTTPError as exc:
             messages = {
                 401: "SearXNG authentication failed.",
@@ -59,18 +90,6 @@ class SearXNGLeadSourceAdapter(LeadSourceAdapter):
             ) from exc
         except (URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise SearXNGError("SearXNG could not be reached or returned invalid JSON.") from exc
-
-        raw_results = payload.get("results", [])
-        if not isinstance(raw_results, list):
-            raise SearXNGError("SearXNG returned an invalid response.")
-        retrieved_at = datetime.now(UTC).isoformat()
-        results = [
-            self._normalize(item, search_query, rank, retrieved_at)
-            for rank, item in enumerate(raw_results[:limit], start=1)
-            if isinstance(item, dict) and item.get("url")
-        ]
-        self.last_search_cost_cents = 0
-        return results
 
     @staticmethod
     def _build_query(query: dict[str, Any]) -> str:

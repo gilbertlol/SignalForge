@@ -214,20 +214,38 @@ def invoke(
         try:
             if adapter is None or not adapter.is_configured():
                 raise GatewayError("Provider adapter is unavailable")
+            supplied_options = dict(options or {})
+            schema_repair_attempts = min(
+                max(int(supplied_options.pop("schema_repair_attempts", 1)), 0), 2
+            )
             adapter_options = {
                 "model": model.model_name,
                 "base_url": model.endpoint.base_url,
                 "timeout": model.endpoint.timeout_seconds,
-                **(options or {}),
+                **supplied_options,
             }
             if model.endpoint.credential_id:
                 credential = model.endpoint.credential
                 if credential is not None:
                     adapter_options["api_key"] = credential.get_secret()
-            text = adapter.complete(prompt, **adapter_options)
-            parsed = json.loads(text) if output_schema else None
-            if output_schema:
-                validate(parsed, output_schema)
+            completion_prompt = prompt
+            parsed = None
+            for repair_attempt in range(schema_repair_attempts + 1):
+                text = adapter.complete(completion_prompt, **adapter_options)
+                if not output_schema:
+                    break
+                try:
+                    parsed = json.loads(text)
+                    validate(parsed, output_schema)
+                    break
+                except (json.JSONDecodeError, ValidationError):
+                    if repair_attempt >= schema_repair_attempts:
+                        raise
+                    completion_prompt = (
+                        f"{prompt}\n\nYour previous response failed the required JSON Schema. "
+                        "Return one corrected JSON value only, with no markdown. Previous "
+                        f"response: {text[:4000]}"
+                    )
             invocation.status = InvocationStatus.SUCCEEDED
             invocation.output_schema_valid = True if output_schema else None
             invocation.latency_ms = int((time.monotonic() - started) * 1000)

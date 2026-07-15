@@ -17,11 +17,13 @@ from urllib.parse import urlparse
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 
-from apps.evidence.models import Reliability, SourceType, VerificationStatus
+from apps.discovery.research import extract_from_evidence, plan_search_queries
+from apps.evidence.models import Evidence, Reliability, SourceType, VerificationStatus
 from apps.evidence.services import record_evidence, record_organization_claims
 from apps.hunting.models import HuntProfileVersion
 from apps.hunting.services import evaluate_candidate
@@ -167,7 +169,7 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
     version = run.hunt_profile_version
     executions = []
     for policy in _get_effective_source_policies(version):
-        execution, _ = ProviderResult.objects.get_or_create(
+        execution, created = ProviderResult.objects.get_or_create(
             discovery_run=run,
             provider_key=policy.source_key,
             defaults={
@@ -200,6 +202,16 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
                 execution.error = f"Unavailable at dispatch: {availability.reason}."
                 execution.finished_at = timezone.now()
                 execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
+        if (
+            created
+            and policy.source_key == "searxng"
+            and execution.status == ProviderResultStatus.QUEUED
+        ):
+            execution.query_snapshot = {
+                **execution.query_snapshot,
+                "research_queries": plan_search_queries(version, base_query),
+            }
+            execution.save(update_fields=["query_snapshot", "updated_at"])
         executions.append(execution)
     return executions
 
@@ -392,6 +404,7 @@ def finalize_run(discovery_run_id) -> DiscoveryRun:
         return run
     _enrich(run)
     _collect_evidence(run)
+    _ai_research(run)
     _score(run)
 
     successful = run.provider_results.filter(
@@ -609,9 +622,7 @@ def _enrich(run: DiscoveryRun) -> None:
                 analysis = adapter.analyze(target_url)
                 observation, _ = WebPageObservation.objects.get_or_create(
                     workspace=run.workspace,
-                    canonical_sha256=hashlib.sha256(
-                        analysis["canonical_url"].encode()
-                    ).hexdigest(),
+                    canonical_sha256=hashlib.sha256(analysis["canonical_url"].encode()).hexdigest(),
                     content_sha256=analysis["content_sha256"],
                     defaults={
                         "canonical_url": analysis["canonical_url"],
@@ -695,6 +706,36 @@ def _collect_evidence(run: DiscoveryRun) -> None:
             reliability=Reliability.HIGH if observed_excerpt else Reliability.MEDIUM,
             verification_status=VerificationStatus.UNVERIFIED,
             is_inferred=False,
+        )
+
+
+def _ai_research(run: DiscoveryRun) -> None:
+    """Best-effort cited suggestions; never mutates verified organization fields."""
+    content_type = ContentType.objects.get_for_model(Organization)
+    for record in _records_ready_for(run):
+        if record.enrichment_runs.filter(provider_key="ai_research").exists():
+            continue
+        evidence_rows = list(
+            Evidence.objects.filter(
+                workspace=run.workspace,
+                content_type=content_type,
+                object_id=record.organization_id,
+            ).order_by("-observed_date")[:10]
+        )
+        if not evidence_rows or record.organization is None:
+            continue
+        extraction = extract_from_evidence(
+            workspace=run.workspace,
+            organization=record.organization,
+            evidence_rows=evidence_rows,
+        )
+        if extraction is None:
+            continue
+        EnrichmentRun.objects.create(
+            source_record=record,
+            provider_key="ai_research",
+            status=EnrichmentRunStatus.SUCCEEDED,
+            result=extraction,
         )
 
 

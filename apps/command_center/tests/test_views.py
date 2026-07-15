@@ -26,7 +26,11 @@ from apps.integrations.models import (
     LeadSourceConfiguration,
     LeadSourceHealthCheck,
     LeadSourceHealthStatus,
+    ModelDefinition,
+    ModelRoute,
+    PrivacyClass,
     ProviderHealthCheck,
+    ProviderType,
 )
 from apps.opportunities.tests.factories import OpportunityFactory
 from apps.organizations.models import Organization
@@ -712,6 +716,50 @@ def test_searxng_live_validation_enables_the_hunt_source(mock_get_adapter, clien
     builder = client.get(reverse("command_center:create-hunt-profile"))
     assert builder.context["form"].fields["use_searxng"].disabled is False
     assert b"Instance validated" in builder.content
+
+
+def test_provider_admin_can_configure_a_local_default_research_route(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    provider = AIProvider.objects.create(
+        workspace=workspace,
+        name="Ollama",
+        provider_key="ollama",
+        provider_type=ProviderType.LOCAL_OPENAI,
+    )
+    endpoint = AIEndpoint.objects.create(
+        workspace=workspace,
+        provider=provider,
+        name="Local Ollama",
+        base_url="http://ollama:11434/v1",
+        privacy_class=PrivacyClass.LOCAL_ONLY,
+    )
+    model = ModelDefinition.objects.create(
+        workspace=workspace,
+        endpoint=endpoint,
+        model_name="qwen3:8b",
+        display_name="Qwen 3 8B",
+    )
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:configure-research-route"),
+        {
+            "task_type": "research_query_planning",
+            "model": model.id,
+            "required_privacy_class": PrivacyClass.LOCAL_ONLY,
+        },
+        follow=True,
+    )
+
+    route = ModelRoute.objects.get(
+        workspace=workspace, task_type="research_query_planning", is_default=True
+    )
+    assert response.status_code == 200
+    assert route.entries.get().model == model
+    assert b"research_query_planning" in response.content
+    assert b"Qwen 3 8B" in response.content
 
 
 @override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")

@@ -8,6 +8,7 @@ from apps.integrations.models import (
     AIEndpoint,
     AIProvider,
     CredentialReference,
+    ModelDefinition,
     PrivacyClass,
     ProviderType,
 )
@@ -321,3 +322,27 @@ class AIModelForm(forms.Form):
             endpoint_field.queryset = AIEndpoint.objects.filter(workspace=workspace).select_related(
                 "provider"
             )
+
+
+class ResearchRouteForm(forms.Form):
+    task_type = forms.ChoiceField(
+        choices=[
+            ("research_query_planning", "Research query planning"),
+            ("organization_extraction", "Organization extraction"),
+            ("evidence_classification", "Evidence classification"),
+            ("hunt_fit_summary", "Hunt-fit summary"),
+        ]
+    )
+    model = forms.ModelChoiceField(queryset=ModelDefinition.objects.none())
+    required_privacy_class = forms.ChoiceField(
+        choices=PrivacyClass.choices, initial=PrivacyClass.LOCAL_ONLY
+    )
+
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace is not None:
+            model_field = self.fields["model"]
+            assert isinstance(model_field, forms.ModelChoiceField)
+            model_field.queryset = ModelDefinition.objects.filter(
+                workspace=workspace, enabled=True, endpoint__enabled=True
+            ).select_related("endpoint__provider")

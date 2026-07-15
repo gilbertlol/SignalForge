@@ -23,11 +23,13 @@ from apps.discovery.models import (
     DiscoveryRun,
     DiscoveryRunStatus,
     DiscoveryRunTrigger,
+    EnrichmentRun,
     ProviderResult,
     ProviderResultStatus,
     SourceRecord,
     SourceRecordStatus,
 )
+from apps.discovery.research import TASK_TYPES
 from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
 from apps.evidence.models import OrganizationClaim
@@ -38,8 +40,11 @@ from apps.integrations.models import (
     AIEndpoint,
     AIProvider,
     CredentialReference,
+    FallbackPolicy,
     LeadSourceConfiguration,
     ModelDefinition,
+    ModelRoute,
+    ModelRouteEntry,
 )
 from apps.integrations.registry import get_lead_source_adapter
 from apps.integrations.services import (
@@ -63,6 +68,7 @@ from .forms import (
     OpportunityStatusForm,
     OrganizationCreateForm,
     ProfileActionForm,
+    ResearchRouteForm,
     SearXNGConfigurationForm,
 )
 
@@ -470,6 +476,12 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "configuration": google,
         },
     ]
+    research_routes = {
+        route.task_type: route
+        for route in ModelRoute.objects.filter(
+            workspace=workspace, task_type__in=TASK_TYPES, is_default=True, enabled=True
+        ).prefetch_related("entries__model__endpoint__provider")
+    }
     return _render(
         request,
         "command_center/provider_settings.html",
@@ -491,6 +503,11 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "credential_form": CredentialForm(),
             "endpoint_form": AIEndpointForm(workspace=workspace),
             "model_form": AIModelForm(workspace=workspace),
+            "research_route_form": ResearchRouteForm(workspace=workspace),
+            "research_task_routes": [
+                {"task_type": task_type, "route": research_routes.get(task_type)}
+                for task_type in TASK_TYPES
+            ],
         },
     )
 
@@ -714,6 +731,40 @@ def create_model(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 @workspace_permission("providers.manage")
+def configure_research_route(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = ResearchRouteForm(request.POST, workspace=workspace)
+    if not form.is_valid():
+        messages.error(request, "Research route configuration is invalid.")
+        return redirect("command_center:provider-settings")
+    task_type = form.cleaned_data["task_type"]
+    ModelRoute.objects.filter(workspace=workspace, task_type=task_type, is_default=True).update(
+        is_default=False
+    )
+    fallback, _ = FallbackPolicy.objects.get_or_create(
+        workspace=workspace,
+        name="Local-first research",
+        defaults={"strategy": "ordered", "max_attempts": 3},
+    )
+    route, _ = ModelRoute.objects.update_or_create(
+        workspace=workspace,
+        task_type=task_type,
+        name=f"Default {task_type.replace('_', ' ')}",
+        defaults={
+            "fallback_policy": fallback,
+            "required_privacy_class": form.cleaned_data["required_privacy_class"],
+            "is_default": True,
+            "enabled": True,
+        },
+    )
+    route.entries.all().delete()
+    ModelRouteEntry.objects.create(route=route, model=form.cleaned_data["model"], position=1)
+    messages.success(request, f"Default {task_type.replace('_', ' ')} route saved.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
 def test_provider_connection(request: HttpRequest, pk) -> HttpResponse:
     provider = get_object_or_404(AIProvider, workspace=get_request_workspace(request), pk=pk)
     result = check_provider(provider)
@@ -910,6 +961,11 @@ def organization_detail(request: HttpRequest, pk) -> HttpResponse:
             "source_records": SourceRecord.objects.filter(organization=organization).select_related(
                 "provider_result"
             ),
+            "ai_suggestions": EnrichmentRun.objects.filter(
+                source_record__organization=organization,
+                provider_key="ai_research",
+                status="succeeded",
+            ).select_related("source_record"),
             "manual_claim_form": ManualClaimForm(),
         },
     )

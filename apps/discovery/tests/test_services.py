@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -71,6 +72,29 @@ def test_unvalidated_paid_source_is_skipped_while_open_source_stays_queued():
     assert executions["openstreetmap"].status == ProviderResultStatus.QUEUED
     assert executions["apollo"].status == ProviderResultStatus.SKIPPED
     assert "API key not configured" in executions["apollo"].error
+
+
+@patch("apps.discovery.services.plan_search_queries")
+@patch("apps.discovery.services.lead_source_availability")
+def test_searxng_ai_query_plan_is_persisted_once_for_idempotent_dispatch(
+    mock_availability, mock_plan
+):
+    profile = HuntProfileFactory()
+    version = create_version(
+        profile,
+        criteria=_always_matches_domain(),
+        source_policies=[{"source_key": "searxng", "max_records": 5}],
+    )
+    mock_availability.return_value = SimpleNamespace(ready=True)
+    mock_plan.return_value = ["manufacturers expanding Quebec"]
+    run = start_run(version, trigger="manual")
+
+    first = prepare_provider_executions(run)[0]
+    second = prepare_provider_executions(run)[0]
+
+    assert first.id == second.id
+    assert second.query_snapshot["research_queries"] == ["manufacturers expanding Quebec"]
+    mock_plan.assert_called_once()
 
 
 def _version(profile, **kwargs):

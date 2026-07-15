@@ -44,6 +44,11 @@ urlpatterns = [
     path("settings/endpoints/new/", views.create_endpoint, name="create-endpoint"),
     path("settings/models/new/", views.create_model, name="create-model"),
     path(
+        "settings/research-routes/",
+        views.configure_research_route,
+        name="configure-research-route",
+    ),
+    path(
         "settings/providers/<uuid:pk>/test/",
         views.test_provider_connection,
         name="test-provider",

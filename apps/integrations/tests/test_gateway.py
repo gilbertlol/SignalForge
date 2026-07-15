@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
 from django.test import override_settings
 from rest_framework.test import APIClient
@@ -78,6 +80,30 @@ def test_mock_gateway_validates_structured_output():
 
     assert result.parsed == {"score": 8}
     assert result.invocation.status == "succeeded"
+
+
+@patch("apps.integrations.services.get_ai_model_adapter")
+def test_gateway_repairs_invalid_structured_output_once(mock_get_adapter):
+    workspace = Workspace.objects.create(name="Repair", slug="repair")
+    route = gateway_fixture(workspace)
+    adapter = MagicMock()
+    adapter.is_configured.return_value = True
+    adapter.complete.side_effect = ['{"wrong": true}', '{"score": 8}']
+    mock_get_adapter.return_value = adapter
+
+    result = invoke(
+        route=route,
+        prompt="classify",
+        output_schema={
+            "type": "object",
+            "required": ["score"],
+            "properties": {"score": {"type": "integer"}},
+        },
+    )
+
+    assert result.parsed == {"score": 8}
+    assert adapter.complete.call_count == 2
+    assert "failed the required JSON Schema" in adapter.complete.call_args.args[0]
 
 
 def test_gateway_blocks_cloud_model_for_local_only_route():
