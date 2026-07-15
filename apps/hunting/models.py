@@ -216,6 +216,11 @@ class SearchScope(BaseModel):
     geographies = models.JSONField(default=list, blank=True)
     company_size_min = models.IntegerField(null=True, blank=True)
     company_size_max = models.IntegerField(null=True, blank=True)
+    keyword = models.CharField(max_length=255, blank=True)
+    included_type = models.SlugField(max_length=100, blank=True)
+    center_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    center_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    radius_meters = models.PositiveIntegerField(null=True, blank=True)
 
     def __str__(self) -> str:
         return f"scope for {self.version}"

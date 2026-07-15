@@ -134,6 +134,15 @@ def _search_query(run: DiscoveryRun) -> dict[str, Any]:
             "geographies": search_scope.geographies,
             "company_size_min": search_scope.company_size_min,
             "company_size_max": search_scope.company_size_max,
+            "keyword": search_scope.keyword,
+            "included_type": search_scope.included_type,
+            "center_latitude": float(search_scope.center_latitude)
+            if search_scope.center_latitude is not None
+            else None,
+            "center_longitude": float(search_scope.center_longitude)
+            if search_scope.center_longitude is not None
+            else None,
+            "radius_meters": search_scope.radius_meters,
         }
 
     return base_query
@@ -158,7 +167,11 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
             discovery_run=run,
             provider_key=policy.source_key,
             defaults={
-                "query_snapshot": {**base_query, "limit": policy.max_records},
+                "query_snapshot": {
+                    **base_query,
+                    "limit": policy.max_records,
+                    "budget_cents": policy.budget_cents,
+                },
                 "policy_snapshot": {
                     "source_key": policy.source_key,
                     "max_records": policy.max_records,
@@ -259,7 +272,7 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         execution.save(update_fields=["status", "finished_at", "updated_at"])
         return execution
 
-    cost = estimated_search_cost if results else 0
+    cost = getattr(adapter, "last_search_cost_cents", estimated_search_cost) if results else 0
     record_cost = 10 if settings.TESTING and policy.source_key == "demo" else 0
     created = 0
     for payload in results:

@@ -263,6 +263,11 @@ def serialize_search_scope(version: HuntProfileVersion) -> dict[str, Any] | None
         "geographies": scope.geographies,
         "company_size_min": scope.company_size_min,
         "company_size_max": scope.company_size_max,
+        "keyword": scope.keyword,
+        "included_type": scope.included_type,
+        "center_latitude": scope.center_latitude,
+        "center_longitude": scope.center_longitude,
+        "radius_meters": scope.radius_meters,
     }
 
 

@@ -262,6 +262,16 @@ Redis → worker wiring; it has no business meaning.
   monetary hunt budgets should block calls; SignalForge cannot infer your Apollo plan's price.
   Start with a low `max_records` value for the first smoke test and confirm the run's provider
   result before increasing it.
+- **Google Places Text Search (New)** is available with `source_key="google_places"`. Enable
+  Places API (New) and billing in Google Cloud, restrict the API key to that API, then configure
+  it under Command center → Providers. SignalForge requests an explicit field mask, pages at most
+  20 results per request and 60 per query, and keeps Google Maps attribution with the source
+  record. Requested fields currently reach Google's Enterprise pricing tier; configure the
+  per-page estimate from your billing account before setting a hunt budget. Under Google's
+  standard terms, Place IDs may be stored indefinitely but other Places content generally may
+  not be cached or persisted. For that reason configuration fails closed unless the workspace
+  explicitly attests that its Google agreement permits this storage. Do not enable that checkbox
+  without the applicable contractual permission; Google Maps attribution must remain visible.
 - **Partial failure is isolated per provider**: each source's `search()` call is wrapped so one
   provider raising doesn't touch another's results — the run ends `partial` (some
   `ProviderResult`s failed, at least one succeeded) rather than `failed` (all of them did).

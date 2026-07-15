@@ -60,6 +60,7 @@ class LeadSourceConfiguration(WorkspaceScopedModel):
     timeout_seconds = models.PositiveIntegerField(default=30)
     estimated_cost_per_page_cents = models.PositiveIntegerField(default=0)
     enabled = models.BooleanField(default=True)
+    config = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [

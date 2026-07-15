@@ -49,6 +49,7 @@ from .forms import (
     AIProviderForm,
     ApolloConfigurationForm,
     CredentialForm,
+    GooglePlacesConfigurationForm,
     HuntProfileForm,
     OpportunityStatusForm,
     ProfileActionForm,
@@ -214,6 +215,11 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                     for value in form.cleaned_data["industries"].split(",")
                     if value.strip()
                 ],
+                "keyword": form.cleaned_data["keyword"],
+                "included_type": form.cleaned_data["included_type"],
+                "center_latitude": form.cleaned_data["center_latitude"],
+                "center_longitude": form.cleaned_data["center_longitude"],
+                "radius_meters": form.cleaned_data["radius_meters"],
             },
             source_policies=[
                 *form.source_policies(),
@@ -318,6 +324,7 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
     providers = AIProvider.objects.filter(workspace=workspace).prefetch_related("endpoints__models")
     lead_sources = list(LeadSourceConfiguration.objects.filter(workspace=workspace))
     apollo = next((source for source in lead_sources if source.source_key == "apollo"), None)
+    google = next((source for source in lead_sources if source.source_key == "google_places"), None)
     source_catalog = [
         {
             "name": "OpenStreetMap",
@@ -357,6 +364,24 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "ready": bool(apollo and apollo.enabled and apollo.credential_id),
             "configuration": apollo,
         },
+        {
+            "name": "Google Places",
+            "source_key": "google_places",
+            "state": "Ready for live searches"
+            if google and google.enabled and google.config.get("storage_permitted")
+            else "Key and storage agreement attestation required",
+            "cost": f"Estimated {google.estimated_cost_per_page_cents}¢ per page"
+            if google
+            else "Field-mask dependent billing",
+            "limits": "Up to 20 results/page and 60/query · Google Maps attribution required",
+            "capabilities": (
+                "Geographic local-business search, categories, addresses, websites, "
+                "phones and ratings"
+            ),
+            "attribution": "Google Maps content · storage restricted by Google Maps Platform terms",
+            "attribution_url": "https://developers.google.com/maps/documentation/places/web-service/policies",
+            "ready": bool(google and google.enabled and google.config.get("storage_permitted")),
+        },
     ]
     return _render(
         request,
@@ -365,6 +390,7 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             "providers": providers,
             "source_catalog": source_catalog,
             "apollo_form": ApolloConfigurationForm(),
+            "google_places_form": GooglePlacesConfigurationForm(),
             "credentials": CredentialReference.objects.filter(workspace=workspace),
             "provider_form": AIProviderForm(),
             "credential_form": CredentialForm(),
@@ -442,6 +468,38 @@ def configure_apollo(request: HttpRequest) -> HttpResponse:
             enabled=form.cleaned_data["enabled"],
         )
     messages.success(request, "Apollo configuration saved and API key encrypted.")
+    return redirect("command_center:provider-settings")
+
+
+@require_POST
+@workspace_permission("providers.manage")
+def configure_google_places(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    form = GooglePlacesConfigurationForm(request.POST)
+    if not form.is_valid():
+        messages.error(
+            request, "Google Places configuration is invalid or lacks storage permission."
+        )
+        return redirect("command_center:provider-settings")
+    credential = CredentialReference(workspace=workspace, name="Google Places API key")
+    credential.set_secret(form.cleaned_data["api_key"])
+    credential.save()
+    configuration, created = LeadSourceConfiguration.objects.get_or_create(
+        workspace=workspace,
+        source_key="google_places",
+        defaults={"name": "Google Places Text Search", "credential": credential},
+    )
+    if not created:
+        old_credential = configuration.credential
+        configuration.credential = credential
+        old_credential.delete()
+    configuration.base_url = "https://places.googleapis.com/v1/places:searchText"
+    configuration.timeout_seconds = form.cleaned_data["timeout_seconds"]
+    configuration.estimated_cost_per_page_cents = form.cleaned_data["estimated_cost_per_page_cents"]
+    configuration.enabled = form.cleaned_data["enabled"]
+    configuration.config = {"storage_permitted": form.cleaned_data["storage_permitted"]}
+    configuration.save()
+    messages.success(request, "Google Places configuration saved; API key encrypted.")
     return redirect("command_center:provider-settings")
 
 
