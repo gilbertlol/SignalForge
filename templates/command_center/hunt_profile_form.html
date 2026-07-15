@@ -1,13 +1,61 @@
-{% extends "command_center/base.html" %}{% block title %}New Hunt Profile{% endblock %}{% block content %}
-<div class="page-heading"><div><p class="eyebrow">Guided setup</p><h1>New Hunt Profile</h1><p>Launch several independent signals together. Every source policy is frozen into the profile version used by each run.</p></div></div>
-<section class="panel preset-panel"><div class="panel-heading"><div><p class="eyebrow">Choose a starting map</p><h2>Niche presets</h2></div><small>Versioned defaults · everything remains editable</small></div><div class="preset-list">{% for preset in presets %}<article class="preset-row{% if selected_preset.pk == preset.pk %} selected{% endif %}"><div class="preset-summary"><div class="preset-title"><strong>{{ preset.name }}</strong><span class="status">v{{ preset.version }}</span></div><p>{{ preset.description }}</p><small>Objective · {{ preset.configuration.scoring_objective }}</small></div><div class="preset-sources">{% for source in preset.source_statuses %}<div class="preset-source"><span class="status {% if source.available %}status-succeeded{% else %}status-partial{% endif %}">{{ source.source_key }} · {% if source.available %}ready{% else %}missing{% endif %}</span><p>{{ source.strengths }}</p>{% if not source.available %}<small>Fallback · {{ source.alternative }}</small>{% endif %}<small>Limit · {{ source.limitations }}</small></div>{% endfor %}</div><div class="preset-action"><a class="button secondary" href="?preset={{ preset.key }}">{% if selected_preset.pk == preset.pk %}Selected{% else %}Use preset{% endif %}</a></div></article>{% endfor %}</div></section>
-<section class="panel form-panel"><form method="post">{% csrf_token %}
-{% if form.errors %}<div class="message error" role="alert" tabindex="-1"><strong>The Hunt Profile was not created.</strong><p>Correct the following fields:</p><ul>{% for field in form %}{% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}{% endfor %}{% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
-{{ form.preset }}{% if selected_preset %}<p class="muted">Starting from {{ selected_preset.name }} v{{ selected_preset.version }}. Adjust any value below before creating the profile.</p>{% endif %}
-<h2>Hunting thesis</h2>{{ form.name.as_field_group }}{{ form.description.as_field_group }}{{ form.require_domain.as_field_group }}{{ form.minimum_score.as_field_group }}{{ form.geographies.as_field_group }}{{ form.industries.as_field_group }}
-{{ form.keyword.as_field_group }}{{ form.included_type.as_field_group }}{{ form.center_latitude.as_field_group }}{{ form.center_longitude.as_field_group }}{{ form.radius_meters.as_field_group }}
-<h2>Source expedition</h2><p class="muted">OpenStreetMap is free public data; Apollo requires an enabled paid credential. Budgets are per run and specified in cents.</p>
-<div class="settings-grid"><div class="provider-card">{{ form.use_openstreetmap.as_field_group }}{{ form.openstreetmap_max_records.as_field_group }}{{ form.openstreetmap_budget_cents.as_field_group }}{{ form.openstreetmap_reliability_weight.as_field_group }}</div><div class="provider-card">{{ form.use_apollo.as_field_group }}{{ form.apollo_max_records.as_field_group }}{{ form.apollo_budget_cents.as_field_group }}{{ form.apollo_reliability_weight.as_field_group }}</div><div class="provider-card">{{ form.use_google_places.as_field_group }}{{ form.google_places_max_records.as_field_group }}{{ form.google_places_budget_cents.as_field_group }}{{ form.google_places_reliability_weight.as_field_group }}</div></div>
-<h2>Execution policy</h2>{{ form.reliability_weight.as_field_group }}{{ form.timeout_seconds.as_field_group }}{{ form.max_retries.as_field_group }}{{ form.manual_only.as_field_group }}{{ form.activate_now.as_field_group }}
-<div class="actions"><button class="button">Create Hunt Profile</button><a class="button secondary" href="{% url 'command_center:hunt-profiles' %}">Cancel</a></div></form></section>
+{% extends "command_center/base.html" %}
+{% block title %}New Hunt Profile{% endblock %}
+{% block content %}
+<div class="page-heading hunt-builder-heading">
+  <div><p class="eyebrow">New expedition</p><h1>What kind of client are we looking for?</h1></div>
+</div>
+
+<section class="preset-picker" aria-labelledby="preset-title">
+  <div class="preset-picker-heading">
+    <div><h2 id="preset-title">Choose a starting point</h2><p>Pick the closest fit. You can change everything afterward.</p></div>
+    <span class="count-pill">{{ presets|length }} paths</span>
+  </div>
+  <div class="preset-list">
+    {% for preset in presets %}
+    <article class="preset-row{% if selected_preset.pk == preset.pk %} selected{% endif %}">
+      <div class="preset-summary">
+        <div class="preset-title"><strong>{{ preset.name }}</strong>{% if selected_preset.pk == preset.pk %}<span class="status status-succeeded">Selected</span>{% endif %}</div>
+        <p>{{ preset.description }}</p>
+        <div class="source-chips" aria-label="Recommended sources">
+          {% for source in preset.source_statuses %}<span class="source-chip{% if source.available %} ready{% endif %}">{{ source.source_key }}{% if not source.available %} · setup needed{% endif %}</span>{% endfor %}
+        </div>
+      </div>
+      <div class="preset-action"><a class="button secondary" href="?preset={{ preset.key }}">{% if selected_preset.pk == preset.pk %}Selected{% else %}Choose{% endif %}</a></div>
+      <details class="preset-details"><summary>Source notes</summary><div class="preset-sources">{% for source in preset.source_statuses %}<div class="preset-source"><strong>{{ source.source_key }}</strong><p>{{ source.strengths }}</p>{% if not source.available %}<small>Fallback · {{ source.alternative }}</small>{% endif %}</div>{% endfor %}</div></details>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel form-panel hunt-builder-panel">
+  <form method="post">{% csrf_token %}
+    {% if form.errors %}<div class="message error" role="alert" tabindex="-1"><strong>Almost there.</strong><p>Please correct:</p><ul>{% for field in form %}{% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}{% endfor %}{% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}</ul></div>{% endif %}
+    {{ form.preset }}
+    <div class="builder-intro"><div><p class="eyebrow">Your hunt</p><h2>{% if selected_preset %}Shape your {{ selected_preset.name|lower }} search{% else %}Build from scratch{% endif %}</h2></div><span>Required fields first</span></div>
+
+    <div class="builder-basics">
+      {{ form.name.as_field_group }}
+      {{ form.description.as_field_group }}
+      <div class="field-pair">{{ form.geographies.as_field_group }}{{ form.industries.as_field_group }}</div>
+      {{ form.minimum_score.as_field_group }}
+    </div>
+
+    <details class="builder-disclosure" {% if form.errors %}open{% endif %}>
+      <summary><span><strong>Search details</strong><small>Keywords, place type and map radius</small></span></summary>
+      <div class="disclosure-body">{{ form.keyword.as_field_group }}{{ form.included_type.as_field_group }}<div class="field-trio">{{ form.center_latitude.as_field_group }}{{ form.center_longitude.as_field_group }}{{ form.radius_meters.as_field_group }}</div>{{ form.require_domain.as_field_group }}</div>
+    </details>
+
+    <details class="builder-disclosure" {% if selected_preset %}open{% endif %}>
+      <summary><span><strong>Lead sources</strong><small>Choose where SignalForge searches</small></span></summary>
+      <div class="disclosure-body settings-grid"><div class="provider-card">{{ form.use_openstreetmap.as_field_group }}{{ form.openstreetmap_max_records.as_field_group }}{{ form.openstreetmap_budget_cents.as_field_group }}{{ form.openstreetmap_reliability_weight.as_field_group }}</div><div class="provider-card">{{ form.use_apollo.as_field_group }}{{ form.apollo_max_records.as_field_group }}{{ form.apollo_budget_cents.as_field_group }}{{ form.apollo_reliability_weight.as_field_group }}</div><div class="provider-card">{{ form.use_google_places.as_field_group }}{{ form.google_places_max_records.as_field_group }}{{ form.google_places_budget_cents.as_field_group }}{{ form.google_places_reliability_weight.as_field_group }}</div></div>
+    </details>
+
+    <details class="builder-disclosure">
+      <summary><span><strong>Run controls</strong><small>Timeouts, retries and manual mode</small></span></summary>
+      <div class="disclosure-body"><div class="field-trio">{{ form.reliability_weight.as_field_group }}{{ form.timeout_seconds.as_field_group }}{{ form.max_retries.as_field_group }}</div>{{ form.manual_only.as_field_group }}</div>
+    </details>
+
+    <div class="builder-submit">{{ form.activate_now.as_field_group }}<div class="actions"><a class="button secondary" href="{% url 'command_center:hunt-profiles' %}">Cancel</a><button class="button">Create Hunt Profile</button></div></div>
+  </form>
+</section>
 {% endblock %}

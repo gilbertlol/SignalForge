@@ -125,8 +125,8 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert response.context["form"].initial["google_places_budget_cents"] == 25
     assert response.context["form"].initial["google_places_reliability_weight"] == 80
     assert b"corporate_registry" in response.content
-    assert b"missing" in response.content
-    assert b"everything remains editable" in response.content
+    assert b"setup needed" in response.content
+    assert b"change everything afterward" in response.content
     assert b'class="preset-list"' in response.content
     assert response.content.count(b'class="preset-row') == 5
 
@@ -202,7 +202,7 @@ def test_hunt_profile_validation_errors_are_summarized_at_top(client):
     response = client.post(reverse("command_center:create-hunt-profile"), {})
 
     assert response.status_code == 200
-    assert b"The Hunt Profile was not created" in response.content
+    assert b"Almost there" in response.content
     assert b"Name: This field is required" in response.content
 
 
