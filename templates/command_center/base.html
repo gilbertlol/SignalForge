@@ -10,30 +10,35 @@
     <link rel="stylesheet" href="{% static 'command_center/settings.css' %}">
   </head>
   <body>
+    <div class="world-glow world-glow-one" aria-hidden="true"></div>
+    <div class="world-glow world-glow-two" aria-hidden="true"></div>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="topbar">
-      <a class="brand" href="{% url 'command_center:dashboard' %}">SignalForge</a>
+      <a class="brand" href="{% url 'command_center:dashboard' %}" aria-label="SignalForge home"><span class="brand-mark" aria-hidden="true"><i></i></span><span><strong>Signal</strong>Forge</span></a>
       <form class="global-search" action="{% url 'command_center:search' %}" method="get" role="search">
         <label class="sr-only" for="global-q">Search</label>
-        <input id="global-q" name="q" type="search" placeholder="Search organizations and contacts…" value="{{ request.GET.q|default:'' }}">
+        <span class="search-spark" aria-hidden="true">⌕</span><input id="global-q" name="q" type="search" placeholder="Search the known territory…" value="{{ request.GET.q|default:'' }}">
         <kbd>/</kbd>
       </form>
-      <div class="account"><span>{{ request.user.display_name|default:request.user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="button secondary">Sign out</button></form></div>
+      <div class="account"><span class="account-orb">{{ request.user.display_name|default:request.user.email|first|upper }}</span><span class="account-name">{{ request.user.display_name|default:request.user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="icon-button" aria-label="Sign out" title="Sign out">↗</button></form></div>
     </header>
     <div class="app-shell">
       <nav class="sidebar" aria-label="Primary">
-        <p class="workspace-label">{{ workspace.name }}</p>
-        <a href="{% url 'command_center:dashboard' %}">Command center</a>
+        <div class="workspace-card"><span class="workspace-pulse"></span><div><small>Active expedition</small><strong>{{ workspace.name }}</strong></div></div>
+        <p class="nav-label">Navigate</p>
+        <a class="{% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'command_center:dashboard' %}"><span aria-hidden="true">✦</span> Command center</a>
         {% if nav.prospects %}
-          <a href="{% url 'command_center:review-queue' %}">Daily review</a>
-          <a href="{% url 'command_center:hunt-profiles' %}">Hunt Profiles</a>
-          <a href="{% url 'command_center:organizations' %}">Organizations</a>
-          <a href="{% url 'command_center:pipeline' %}">Opportunity pipeline</a>
-          <a href="{% url 'command_center:runs' %}">System runs</a>
+          <a class="{% if request.resolver_match.url_name == 'review-queue' %}active{% endif %}" href="{% url 'command_center:review-queue' %}"><span aria-hidden="true">◈</span> Signal review</a>
+          <a class="{% if 'hunt-profile' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'command_center:hunt-profiles' %}"><span aria-hidden="true">⌁</span> Hunts</a>
+          <a class="{% if 'organization' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'command_center:organizations' %}"><span aria-hidden="true">◇</span> Discoveries</a>
+          <a class="{% if request.resolver_match.url_name == 'pipeline' %}active{% endif %}" href="{% url 'command_center:pipeline' %}"><span aria-hidden="true">⟡</span> Gold trail</a>
+          <a class="{% if request.resolver_match.url_name == 'runs' %}active{% endif %}" href="{% url 'command_center:runs' %}"><span aria-hidden="true">≋</span> Expedition log</a>
         {% endif %}
-        {% if nav.communications %}<a href="{% url 'command_center:inbox' %}">Unified inbox</a>{% endif %}
-        {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}">AI providers</a>{% endif %}
-        {% if nav.users %}<a href="/api/v1/memberships/">Users</a>{% endif %}
+        <p class="nav-label nav-label-system">System</p>
+        {% if nav.communications %}<a href="{% url 'command_center:inbox' %}"><span aria-hidden="true">⌁</span> Messages</a>{% endif %}
+        {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}"><span aria-hidden="true">⚙</span> Sources & models</a>{% endif %}
+        {% if nav.users %}<a href="/api/v1/memberships/"><span aria-hidden="true">◌</span> Crew</a>{% endif %}
+        <div class="sidebar-hope"><span aria-hidden="true">✧</span><p><strong>Stay curious.</strong><br>The right client may be one signal away.</p></div>
       </nav>
       <main id="main" class="content" tabindex="-1">
         {% if messages %}<div class="notices" aria-live="polite">{% for message in messages %}<p class="notice {{ message.tags }}">{{ message }}</p>{% endfor %}</div>{% endif %}

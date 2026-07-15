@@ -1,14 +1,18 @@
 {% extends "command_center/base.html" %}
 {% block title %}Command Center{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><p class="eyebrow">Today</p><h1>Command center</h1><p>What needs attention across acquisition and outreach.</p></div></div>
-  <section class="metrics" aria-label="Operational summary">
-    <a class="metric" href="{% url 'command_center:review-queue' %}"><span>Review queue</span><strong>{{ review_count }}</strong><small>qualified candidates</small></a>
-    <a class="metric" href="{% url 'command_center:inbox' %}"><span>Approvals</span><strong>{{ pending_approval_count }}</strong><small>messages waiting</small></a>
-    <a class="metric" href="{% url 'command_center:runs' %}"><span>Active runs</span><strong>{{ active_run_count }}</strong><small>pending or running</small></a>
-    <a class="metric" href="{% url 'command_center:organizations' %}"><span>Organizations</span><strong>{{ organization_count }}</strong><small>known accounts</small></a>
+  <section class="discovery-hero">
+    <div class="hero-copy"><p class="eyebrow gold">The search continues</p><h1>The next <em>remarkable client</em><br>is somewhere out there.</h1><p>Follow the signals. Trust the evidence. Every expedition narrows the distance between possibility and the right partnership.</p><div class="hero-actions"><a class="button" href="{% url 'command_center:hunt-profiles' %}"><span>Begin a hunt</span><b aria-hidden="true">→</b></a><a class="text-link" href="{% url 'command_center:review-queue' %}">Review new signals <span>↗</span></a></div></div>
+    <div class="signal-orbit" aria-hidden="true"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div><div class="radar-line"></div><div class="signal-core"><span>✦</span><small>Signal<br>origin</small></div><i class="signal-dot dot-a"></i><i class="signal-dot dot-b"></i><i class="signal-dot dot-c"></i><span class="coordinate coordinate-a">43.6532° N</span><span class="coordinate coordinate-b">79.3832° W</span></div>
   </section>
-  <section class="panel"><div class="panel-heading"><div><p class="eyebrow">Discovery</p><h2>Recent runs</h2></div><a href="{% url 'command_center:runs' %}">View all</a></div>
+  <div class="section-intro"><div><p class="eyebrow">Your horizon</p><h2>Signals worth following</h2></div><p>Small movements become meaningful patterns.</p></div>
+  <section class="metrics" aria-label="Operational summary">
+    <a class="metric metric-gold" href="{% url 'command_center:review-queue' %}"><span class="metric-icon">✦</span><span>Promising signals</span><strong>{{ review_count }}</strong><small>qualified discoveries waiting</small><i>Explore →</i></a>
+    <a class="metric" href="{% url 'command_center:inbox' %}"><span class="metric-icon">⌁</span><span>Awaiting judgment</span><strong>{{ pending_approval_count }}</strong><small>thoughtful messages to review</small><i>Review →</i></a>
+    <a class="metric" href="{% url 'command_center:runs' %}"><span class="metric-icon">◎</span><span>Hunts in motion</span><strong>{{ active_run_count }}</strong><small>expeditions tracing signals</small><i>Track →</i></a>
+    <a class="metric" href="{% url 'command_center:organizations' %}"><span class="metric-icon">◇</span><span>Known territory</span><strong>{{ organization_count }}</strong><small>organizations brought to light</small><i>Discover →</i></a>
+  </section>
+  <section class="panel expedition-panel"><div class="panel-heading"><div><p class="eyebrow">Field notes</p><h2>Recent expeditions</h2></div><a class="text-link" href="{% url 'command_center:runs' %}">Open the full log <span>→</span></a></div>
     {% if recent_runs %}<div class="table-wrap"><table><thead><tr><th>Profile</th><th>Status</th><th>Qualified</th><th>Failed</th><th>Started</th></tr></thead><tbody>{% for run in recent_runs %}<tr><td>{{ run.hunt_profile_version.hunt_profile.name }}</td><td><span class="status status-{{ run.status }}">{{ run.get_status_display }}</span></td><td>{{ run.records_qualified }}</td><td>{{ run.records_failed }}</td><td>{{ run.started_at|default:"Not started" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty"><h3>No discovery runs yet</h3><p>Activate a Hunt Profile and start a run through the API while the guided builder is in progress.</p></div>{% endif %}
   </section>
 {% endblock %}

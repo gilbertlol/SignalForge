@@ -1,17 +1,33 @@
+{% load static %}
 <!doctype html>
 <html lang="en">
-  <head><meta charset="utf-8"><title>Sign in · SignalForge</title></head>
-  <body>
-    <main>
-      <h1>Sign in to SignalForge</h1>
-      {% if form.errors %}<p>Invalid email or password.</p>{% endif %}
-      <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
-        <input type="hidden" name="next" value="{{ next }}">
-        <button type="submit">Sign in</button>
-      </form>
-      <a href="{% url 'password_reset' %}">Forgot password?</a>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Enter the forge · SignalForge</title>
+    <link rel="stylesheet" href="{% static 'command_center/app.css' %}">
+    <link rel="stylesheet" href="{% static 'command_center/auth.css' %}">
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-story">
+        <a class="brand auth-brand" href="/"><span class="brand-mark" aria-hidden="true"><i></i></span><span><strong>Signal</strong>Forge</span></a>
+        <div class="auth-message"><p class="eyebrow gold">There are always more signals</p><h1>Somewhere in the noise<br>is a <em>golden opportunity.</em></h1><p>Return to the search. The right partnership rarely announces itself—it leaves a trail.</p></div>
+        <div class="auth-compass" aria-hidden="true"><span>✦</span><i></i></div>
+        <p class="auth-coordinate">43.6532° N&nbsp;&nbsp; 79.3832° W</p>
+      </section>
+      <section class="auth-entry">
+        <div class="auth-form-wrap"><p class="eyebrow">Private expedition</p><h2>Welcome back.</h2><p class="muted">Your search is waiting where you left it.</p>
+          {% if form.errors %}<p class="notice error">Those credentials did not open the forge. Try again.</p>{% endif %}
+          <form method="post" class="auth-form">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <input type="hidden" name="next" value="{{ next }}">
+            <button class="button auth-submit" type="submit"><span>Enter SignalForge</span><b aria-hidden="true">→</b></button>
+          </form>
+          <a class="text-link" href="{% url 'password_reset' %}">Forgot your access? <span>↗</span></a>
+        </div>
+      </section>
     </main>
   </body>
 </html>

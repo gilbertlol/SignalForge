@@ -8,16 +8,19 @@
 
 .pipeline-column {
   min-width: 230px;
-  background: var(--surface);
+  background: linear-gradient(165deg, rgba(17,31,33,.88), rgba(8,17,18,.9));
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
 }
 
 .opportunity-card {
-  padding: 16px;
+  padding: 18px;
   border-bottom: 1px solid var(--line);
+  transition: background .2s ease;
 }
+
+.opportunity-card:hover { background: rgba(116, 201, 182, .035); }
 
 .opportunity-card > a {
   color: var(--text);
@@ -41,12 +44,20 @@ table form,
 select,
 .form-panel input,
 .form-panel textarea {
-  background: var(--surface-2);
+  background: rgba(11, 23, 25, .9);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text);
   padding: 9px 10px;
   max-width: 100%;
+}
+
+select:focus,
+.form-panel input:focus,
+.form-panel textarea:focus {
+  outline: none;
+  border-color: rgba(229, 191, 105, .45);
+  box-shadow: 0 0 0 4px rgba(229, 191, 105, .05);
 }
 
 .form-panel {
@@ -56,11 +67,16 @@ select,
 
 .form-panel label {
   display: block;
-  font-weight: 700;
+  color: #a9bbb5;
+  font-size: 11px;
+  font-weight: 600;
   margin-bottom: 6px;
 }
 
 .form-panel input[type="text"],
+.form-panel input[type="url"],
+.form-panel input[type="password"],
+.form-panel input[type="email"],
 .form-panel input[type="number"],
 .form-panel textarea {
   width: 100%;
