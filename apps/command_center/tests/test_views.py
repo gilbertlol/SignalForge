@@ -127,6 +127,8 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert b"corporate_registry" in response.content
     assert b"missing" in response.content
     assert b"everything remains editable" in response.content
+    assert b'class="preset-list"' in response.content
+    assert response.content.count(b'class="preset-row') == 5
 
 
 def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_profile(client):
