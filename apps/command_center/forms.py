@@ -1,7 +1,13 @@
 from django import forms
 
 from apps.hunting.models import HuntProfileStatus
-from apps.integrations.models import PrivacyClass, ProviderType
+from apps.integrations.models import (
+    AIEndpoint,
+    AIProvider,
+    CredentialReference,
+    PrivacyClass,
+    ProviderType,
+)
 from apps.opportunities.models import OpportunityStatus
 
 
@@ -18,8 +24,12 @@ class HuntProfileForm(forms.Form):
         required=False,
         help_text="Comma-separated niche/category keywords, for example dentist, accountant.",
     )
-    use_openstreetmap = forms.BooleanField(required=False, initial=True, label="OpenStreetMap businesses")
-    openstreetmap_max_records = forms.IntegerField(min_value=1, max_value=100, initial=25, required=False)
+    use_openstreetmap = forms.BooleanField(
+        required=False, initial=True, label="OpenStreetMap businesses"
+    )
+    openstreetmap_max_records = forms.IntegerField(
+        min_value=1, max_value=100, initial=25, required=False
+    )
     openstreetmap_budget_cents = forms.IntegerField(min_value=0, required=False)
     use_apollo = forms.BooleanField(required=False, label="Apollo Organization Search")
     apollo_max_records = forms.IntegerField(min_value=1, max_value=100, initial=10, required=False)
@@ -53,7 +63,9 @@ class HuntProfileForm(forms.Form):
                     "max_records": self.cleaned_data[f"{key}_max_records"],
                     "reliability_weight": self.cleaned_data.get("reliability_weight") or 50,
                     "timeout_seconds": self.cleaned_data.get("timeout_seconds") or 30,
-                    "max_retries": 2 if self.cleaned_data.get("max_retries") is None else self.cleaned_data["max_retries"],
+                    "max_retries": 2
+                    if self.cleaned_data.get("max_retries") is None
+                    else self.cleaned_data["max_retries"],
                     "priority": len(policies) + 1,
                 }
                 budget = self.cleaned_data.get(f"{key}_budget_cents")
@@ -103,18 +115,43 @@ class ApolloConfigurationForm(forms.Form):
 
 
 class AIEndpointForm(forms.Form):
-    provider = forms.UUIDField()
+    provider = forms.ModelChoiceField(
+        queryset=AIProvider.objects.none(), empty_label="Select a provider"
+    )
     name = forms.CharField(max_length=255)
     base_url = forms.URLField(required=False, assume_scheme="http")
-    credential = forms.UUIDField(required=False)
+    credential = forms.ModelChoiceField(
+        queryset=CredentialReference.objects.none(), required=False, empty_label="No credential"
+    )
     timeout_seconds = forms.IntegerField(min_value=1, max_value=300, initial=30)
     privacy_class = forms.ChoiceField(choices=PrivacyClass.choices)
 
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace is not None:
+            provider_field = self.fields["provider"]
+            credential_field = self.fields["credential"]
+            assert isinstance(provider_field, forms.ModelChoiceField)
+            assert isinstance(credential_field, forms.ModelChoiceField)
+            provider_field.queryset = AIProvider.objects.filter(workspace=workspace)
+            credential_field.queryset = CredentialReference.objects.filter(workspace=workspace)
+
 
 class AIModelForm(forms.Form):
-    endpoint = forms.UUIDField()
+    endpoint = forms.ModelChoiceField(
+        queryset=AIEndpoint.objects.none(), empty_label="Select an endpoint"
+    )
     model_name = forms.CharField(max_length=255)
     display_name = forms.CharField(max_length=255)
     context_limit = forms.IntegerField(min_value=1, initial=8192)
     input_cost_per_million = forms.DecimalField(min_value=0, initial=0)
     output_cost_per_million = forms.DecimalField(min_value=0, initial=0)
+
+    def __init__(self, *args, workspace=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if workspace is not None:
+            endpoint_field = self.fields["endpoint"]
+            assert isinstance(endpoint_field, forms.ModelChoiceField)
+            endpoint_field.queryset = AIEndpoint.objects.filter(workspace=workspace).select_related(
+                "provider"
+            )

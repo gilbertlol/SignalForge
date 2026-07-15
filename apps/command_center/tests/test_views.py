@@ -7,7 +7,12 @@ from django.urls import reverse
 from apps.accounts.models import AccessPermission
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import Workspace
-from apps.discovery.models import DiscoveryRunStatus, ProviderResult, ProviderResultStatus
+from apps.discovery.models import (
+    DiscoveryRunStatus,
+    ProviderResult,
+    ProviderResultStatus,
+    SourceRecord,
+)
 from apps.discovery.services import start_run
 from apps.hunting.models import HuntProfile
 from apps.hunting.services import create_version
@@ -89,9 +94,9 @@ def test_create_hunt_profile_builds_version_and_activates(client):
             "description": "Local automation agencies",
             "require_domain": "on",
             "minimum_score": 12,
-                "use_openstreetmap": "on",
-                "openstreetmap_max_records": 20,
-                "geographies": "Toronto",
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 20,
+            "geographies": "Toronto",
             "activate_now": "on",
         },
     )
@@ -109,7 +114,13 @@ def test_start_discovery_dispatches_workspace_scoped_run(mock_delay, client):
     client.force_login(user)
     client.post(
         reverse("command_center:create-hunt-profile"),
-        {"name": "Runnable", "minimum_score": 1, "use_openstreetmap": "on", "openstreetmap_max_records": 5, "geographies": "Toronto"},
+        {
+            "name": "Runnable",
+            "minimum_score": 1,
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 5,
+            "geographies": "Toronto",
+        },
     )
     profile = HuntProfile.objects.get(name="Runnable")
 
@@ -181,12 +192,29 @@ def test_start_discovery_rejects_unconfigured_live_source(mock_delay, client):
 
 
 def test_run_monitor_renders_independent_provider_outcomes(client):
-    user = UserFactory(); client.force_login(user)
-    client.post(reverse("command_center:create-hunt-profile"), {"name":"Monitored","minimum_score":1,"use_openstreetmap":"on","openstreetmap_max_records":5,"geographies":"Toronto"})
+    user = UserFactory()
+    client.force_login(user)
+    client.post(
+        reverse("command_center:create-hunt-profile"),
+        {
+            "name": "Monitored",
+            "minimum_score": 1,
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 5,
+            "geographies": "Toronto",
+        },
+    )
     profile = HuntProfile.objects.get(name="Monitored")
     run = start_run(profile.current_version, trigger="manual", initiated_by=user)
-    run.status = DiscoveryRunStatus.RUNNING; run.save()
-    ProviderResult.objects.create(discovery_run=run, provider_key="openstreetmap", status=ProviderResultStatus.RETRYING, attempt_count=2, records_returned=3)
+    run.status = DiscoveryRunStatus.RUNNING
+    run.save()
+    ProviderResult.objects.create(
+        discovery_run=run,
+        provider_key="openstreetmap",
+        status=ProviderResultStatus.RETRYING,
+        attempt_count=2,
+        records_returned=3,
+    )
 
     response = client.get(reverse("command_center:run-status-fragment"))
 
@@ -197,15 +225,26 @@ def test_run_monitor_renders_independent_provider_outcomes(client):
 
 
 def test_cancel_run_marks_nonterminal_sources_canceled(client):
-    user = UserFactory(); client.force_login(user)
-    client.post(reverse("command_center:create-hunt-profile"), {"name":"Cancelable","minimum_score":1,"use_openstreetmap":"on","openstreetmap_max_records":5,"geographies":"Toronto"})
+    user = UserFactory()
+    client.force_login(user)
+    client.post(
+        reverse("command_center:create-hunt-profile"),
+        {
+            "name": "Cancelable",
+            "minimum_score": 1,
+            "use_openstreetmap": "on",
+            "openstreetmap_max_records": 5,
+            "geographies": "Toronto",
+        },
+    )
     profile = HuntProfile.objects.get(name="Cancelable")
     run = start_run(profile.current_version, trigger="manual", initiated_by=user)
     source = ProviderResult.objects.create(discovery_run=run, provider_key="openstreetmap")
 
-    response = client.post(reverse("command_center:cancel-run", kwargs={"pk":run.pk}))
+    response = client.post(reverse("command_center:cancel-run", kwargs={"pk": run.pk}))
 
-    run.refresh_from_db(); source.refresh_from_db()
+    run.refresh_from_db()
+    source.refresh_from_db()
     assert response.status_code == 302
     assert run.status == DiscoveryRunStatus.CANCELED
     assert source.status == ProviderResultStatus.CANCELED
@@ -281,6 +320,73 @@ def test_provider_workspace_encrypts_and_never_renders_secret(client):
     assert "never-render-this-secret" not in response.content.decode()
     assert "never-render-this-secret" not in credential.encrypted_value
     assert credential.get_secret() == "never-render-this-secret"
+
+
+def test_provider_catalog_explains_real_sources_and_uses_scoped_selectors(client):
+    user = UserFactory()
+    grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    provider = AIProvider.objects.create(
+        workspace=workspace, name="Local AI", provider_key="local-ai", provider_type="mock"
+    )
+    credential = CredentialReference(workspace=workspace, name="Local secret")
+    credential.set_secret("hidden")
+    credential.save()
+    client.force_login(user)
+
+    response = client.get(reverse("command_center:provider-settings"))
+
+    assert response.status_code == 200
+    assert b"OpenStreetMap" in response.content
+    assert b"no API key required" in response.content
+    assert b"Open Database License" in response.content
+    assert b"public Overpass fair-use limits" in response.content
+    assert f'value="{provider.id}"'.encode() in response.content
+    assert f'value="{credential.id}"'.encode() in response.content
+    assert b"Use provider and credential UUIDs" not in response.content
+
+
+def test_organization_detail_links_original_source_and_attribution(client):
+    user = UserFactory()
+    workspace = user.memberships.get().workspace
+    organization = OrganizationFactory(workspace=workspace)
+    profile = HuntProfile.objects.create(workspace=workspace, name="Provenance")
+    version = create_version(
+        profile,
+        criteria={
+            "type": "group",
+            "operator": "AND",
+            "children": [
+                {
+                    "type": "criterion",
+                    "category": "custom_attribute",
+                    "field": "domain",
+                    "op": "neq",
+                    "value": "",
+                    "weight": 1,
+                }
+            ],
+        },
+    )
+    run = start_run(version, trigger="manual", initiated_by=user)
+    SourceRecord.objects.create(
+        discovery_run=run,
+        source_key="openstreetmap",
+        external_id="node-42",
+        organization=organization,
+        raw_payload={
+            "source_url": "https://www.openstreetmap.org/node/42",
+            "source_attribution": "© OpenStreetMap contributors (ODbL)",
+        },
+    )
+    client.force_login(user)
+
+    response = client.get(
+        reverse("command_center:organization-detail", kwargs={"pk": organization.pk})
+    )
+
+    assert b"View original provider record" in response.content
+    assert b"OpenStreetMap contributors" in response.content
 
 
 @override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")

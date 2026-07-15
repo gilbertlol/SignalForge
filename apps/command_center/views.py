@@ -134,9 +134,11 @@ def review_queue(request: HttpRequest) -> HttpResponse:
 @workspace_permission("prospects.access")
 def hunt_profiles(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
-    profiles = HuntProfile.objects.filter(workspace=workspace).select_related(
-        "current_version"
-    ).prefetch_related("current_version__source_policies")
+    profiles = (
+        HuntProfile.objects.filter(workspace=workspace)
+        .select_related("current_version")
+        .prefetch_related("current_version__source_policies")
+    )
     for profile in profiles:
         profile.source_preflight = []
         if profile.current_version:
@@ -254,7 +256,9 @@ def start_discovery(request: HttpRequest, pk) -> HttpResponse:
     all_policies = profile.current_version.source_policies.all()
     policies = all_policies.filter(is_enabled=True)
     if not policies.exists():
-        messages.info(request, "This is a manual/CSV-only profile; it has no automatic source to run.")
+        messages.info(
+            request, "This is a manual/CSV-only profile; it has no automatic source to run."
+        )
         return redirect("command_center:hunt-profiles")
     for policy in policies:
         adapter = get_lead_source_adapter(policy.source_key, workspace=profile.workspace)
@@ -312,18 +316,60 @@ def opportunity_status(request: HttpRequest, pk) -> HttpResponse:
 def provider_settings(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
     providers = AIProvider.objects.filter(workspace=workspace).prefetch_related("endpoints__models")
+    lead_sources = list(LeadSourceConfiguration.objects.filter(workspace=workspace))
+    apollo = next((source for source in lead_sources if source.source_key == "apollo"), None)
+    source_catalog = [
+        {
+            "name": "OpenStreetMap",
+            "source_key": "openstreetmap",
+            "state": "Ready — no API key required",
+            "cost": "Free public data · no per-result fee",
+            "limits": (
+                "Geography required · up to 100 records per hunt · "
+                "public Overpass fair-use limits"
+            ),
+            "capabilities": (
+                "Local businesses, places, categories, addresses, websites and phone numbers "
+                "when mapped"
+            ),
+            "attribution": "© OpenStreetMap contributors · Open Database License (ODbL)",
+            "attribution_url": "https://www.openstreetmap.org/copyright",
+            "ready": True,
+        },
+        {
+            "name": "Apollo Organization Search",
+            "source_key": "apollo",
+            "state": "Ready for live searches"
+            if apollo and apollo.enabled and apollo.credential_id
+            else (
+                "Disabled"
+                if apollo and not apollo.enabled
+                else "API key and compatible Apollo plan required"
+            ),
+            "cost": f"Estimated {apollo.estimated_cost_per_page_cents}¢ per returned page"
+            if apollo
+            else "Plan-dependent credit usage",
+            "limits": (
+                "Up to 100 records per hunt · availability depends on Apollo plan entitlements"
+            ),
+            "capabilities": "Organization filters, domains, industries and company metadata",
+            "attribution": "Commercial provider data · subject to your Apollo plan and terms",
+            "ready": bool(apollo and apollo.enabled and apollo.credential_id),
+            "configuration": apollo,
+        },
+    ]
     return _render(
         request,
         "command_center/provider_settings.html",
         {
             "providers": providers,
-            "lead_sources": LeadSourceConfiguration.objects.filter(workspace=workspace),
+            "source_catalog": source_catalog,
             "apollo_form": ApolloConfigurationForm(),
             "credentials": CredentialReference.objects.filter(workspace=workspace),
             "provider_form": AIProviderForm(),
             "credential_form": CredentialForm(),
-            "endpoint_form": AIEndpointForm(),
-            "model_form": AIModelForm(),
+            "endpoint_form": AIEndpointForm(workspace=workspace),
+            "model_form": AIModelForm(workspace=workspace),
         },
     )
 
@@ -424,18 +470,17 @@ def test_apollo_connection(request: HttpRequest) -> HttpResponse:
 @workspace_permission("providers.manage")
 def create_endpoint(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
-    form = AIEndpointForm(request.POST)
+    # Preserve an explicit 404 for identifiers outside the active workspace,
+    # while the form provides friendly validation for ordinary bad input.
+    if (
+        request.POST.get("provider")
+        and AIProvider.objects.filter(pk=request.POST["provider"]).exists()
+    ):
+        get_object_or_404(AIProvider, workspace=workspace, pk=request.POST["provider"])
+    form = AIEndpointForm(request.POST, workspace=workspace)
     if form.is_valid():
-        provider = get_object_or_404(
-            AIProvider, workspace=workspace, pk=form.cleaned_data["provider"]
-        )
-        credential = None
-        if form.cleaned_data["credential"]:
-            credential = get_object_or_404(
-                CredentialReference,
-                workspace=workspace,
-                pk=form.cleaned_data["credential"],
-            )
+        provider = form.cleaned_data["provider"]
+        credential = form.cleaned_data["credential"]
         AIEndpoint.objects.create(
             workspace=workspace,
             provider=provider,
@@ -455,11 +500,9 @@ def create_endpoint(request: HttpRequest) -> HttpResponse:
 @workspace_permission("providers.manage")
 def create_model(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
-    form = AIModelForm(request.POST)
+    form = AIModelForm(request.POST, workspace=workspace)
     if form.is_valid():
-        endpoint = get_object_or_404(
-            AIEndpoint, workspace=workspace, pk=form.cleaned_data["endpoint"]
-        )
+        endpoint = form.cleaned_data["endpoint"]
         ModelDefinition.objects.create(
             workspace=workspace,
             endpoint=endpoint,
@@ -499,27 +542,60 @@ def _run_monitor_context(request: HttpRequest) -> dict:
     runs = list(
         DiscoveryRun.objects.filter(workspace=get_request_workspace(request))
         .select_related("hunt_profile_version__profile", "initiated_by")
-        .prefetch_related("provider_results__records", "hunt_profile_version__source_policies")[:100]
+        .prefetch_related("provider_results__records", "hunt_profile_version__source_policies")[
+            :100
+        ]
     )
     now = timezone.now()
     provider_terminal = {
-        ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY, ProviderResultStatus.FAILED,
-        ProviderResultStatus.PARTIAL, ProviderResultStatus.TIMED_OUT,
-        ProviderResultStatus.CANCELED, ProviderResultStatus.BUDGET_BLOCKED,
+        ProviderResultStatus.SUCCEEDED,
+        ProviderResultStatus.EMPTY,
+        ProviderResultStatus.FAILED,
+        ProviderResultStatus.PARTIAL,
+        ProviderResultStatus.TIMED_OUT,
+        ProviderResultStatus.CANCELED,
+        ProviderResultStatus.BUDGET_BLOCKED,
     }
-    run_terminal = {DiscoveryRunStatus.SUCCEEDED, DiscoveryRunStatus.FAILED, DiscoveryRunStatus.PARTIAL, DiscoveryRunStatus.CANCELED}
+    run_terminal = {
+        DiscoveryRunStatus.SUCCEEDED,
+        DiscoveryRunStatus.FAILED,
+        DiscoveryRunStatus.PARTIAL,
+        DiscoveryRunStatus.CANCELED,
+    }
     for run in runs:
         policies = {p.source_key: p for p in run.hunt_profile_version.source_policies.all()}
         providers = list(run.provider_results.all())
         run.providers_live = providers
         run.is_terminal_ui = run.status in run_terminal
-        run.elapsed_seconds_ui = int(((run.finished_at or now) - (run.started_at or run.created_at)).total_seconds())
-        run.phase_ui = "complete" if run.is_terminal_ui else ("downstream processing" if providers and all(p.status in provider_terminal for p in providers) else "provider search")
+        run.elapsed_seconds_ui = int(
+            ((run.finished_at or now) - (run.started_at or run.created_at)).total_seconds()
+        )
+        run.phase_ui = (
+            "complete"
+            if run.is_terminal_ui
+            else (
+                "downstream processing"
+                if providers and all(p.status in provider_terminal for p in providers)
+                else "provider search"
+            )
+        )
         for provider in providers:
             policy = policies.get(provider.provider_key)
-            provider.elapsed_seconds_ui = int(((provider.finished_at or now) - (provider.started_at or provider.created_at)).total_seconds())
-            provider.deadline_ui = provider.started_at + timedelta(seconds=policy.timeout_seconds) if provider.started_at and policy else None
-            provider.can_cancel_ui = provider.status in {ProviderResultStatus.QUEUED, ProviderResultStatus.RETRYING, ProviderResultStatus.RATE_LIMITED}
+            provider.elapsed_seconds_ui = int(
+                (
+                    (provider.finished_at or now) - (provider.started_at or provider.created_at)
+                ).total_seconds()
+            )
+            provider.deadline_ui = (
+                provider.started_at + timedelta(seconds=policy.timeout_seconds)
+                if provider.started_at and policy
+                else None
+            )
+            provider.can_cancel_ui = provider.status in {
+                ProviderResultStatus.QUEUED,
+                ProviderResultStatus.RETRYING,
+                ProviderResultStatus.RATE_LIMITED,
+            }
     return {"runs": runs, "has_active_runs": any(not run.is_terminal_ui for run in runs)}
 
 
@@ -532,11 +608,23 @@ def run_status_fragment(request: HttpRequest) -> HttpResponse:
 @workspace_permission("prospects.access")
 def cancel_run(request: HttpRequest, pk) -> HttpResponse:
     run = get_object_or_404(DiscoveryRun, workspace=get_request_workspace(request), pk=pk)
-    if run.status not in {DiscoveryRunStatus.SUCCEEDED, DiscoveryRunStatus.FAILED, DiscoveryRunStatus.PARTIAL, DiscoveryRunStatus.CANCELED}:
+    if run.status not in {
+        DiscoveryRunStatus.SUCCEEDED,
+        DiscoveryRunStatus.FAILED,
+        DiscoveryRunStatus.PARTIAL,
+        DiscoveryRunStatus.CANCELED,
+    }:
         run.status = DiscoveryRunStatus.CANCELED
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "finished_at", "updated_at"])
-        for provider in run.provider_results.exclude(status__in=[ProviderResultStatus.SUCCEEDED, ProviderResultStatus.EMPTY, ProviderResultStatus.FAILED, ProviderResultStatus.CANCELED]):
+        for provider in run.provider_results.exclude(
+            status__in=[
+                ProviderResultStatus.SUCCEEDED,
+                ProviderResultStatus.EMPTY,
+                ProviderResultStatus.FAILED,
+                ProviderResultStatus.CANCELED,
+            ]
+        ):
             provider.status = ProviderResultStatus.CANCELED
             provider.finished_at = timezone.now()
             provider.save(update_fields=["status", "finished_at", "updated_at"])
@@ -547,8 +635,14 @@ def cancel_run(request: HttpRequest, pk) -> HttpResponse:
 @require_POST
 @workspace_permission("prospects.access")
 def cancel_source(request: HttpRequest, pk) -> HttpResponse:
-    provider = get_object_or_404(ProviderResult, discovery_run__workspace=get_request_workspace(request), pk=pk)
-    if provider.status in {ProviderResultStatus.QUEUED, ProviderResultStatus.RETRYING, ProviderResultStatus.RATE_LIMITED}:
+    provider = get_object_or_404(
+        ProviderResult, discovery_run__workspace=get_request_workspace(request), pk=pk
+    )
+    if provider.status in {
+        ProviderResultStatus.QUEUED,
+        ProviderResultStatus.RETRYING,
+        ProviderResultStatus.RATE_LIMITED,
+    }:
         provider.status = ProviderResultStatus.CANCELED
         provider.finished_at = timezone.now()
         provider.save(update_fields=["status", "finished_at", "updated_at"])
@@ -589,6 +683,9 @@ def organization_detail(request: HttpRequest, pk) -> HttpResponse:
             "conversations": conversations,
             "claims": organization.source_claims.select_related("source_record").all(),
             "resolutions": organization.field_resolutions.select_related("selected_claim").all(),
+            "source_records": SourceRecord.objects.filter(organization=organization).select_related(
+                "provider_result"
+            ),
         },
     )
 
