@@ -13,11 +13,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import transaction
+from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
-from billiard.exceptions import SoftTimeLimitExceeded
 
 from apps.evidence.models import Reliability, SourceType, VerificationStatus
 from apps.evidence.services import record_evidence, record_organization_claims
@@ -28,6 +28,7 @@ from apps.integrations.registry import (
     get_technology_detection_adapter,
     get_website_analysis_adapter,
 )
+from apps.organizations.models import Organization
 from apps.organizations.services import create_organization, normalize_domain
 from apps.scoring.models import ScoreFamily
 from apps.scoring.services import evaluate
@@ -37,6 +38,7 @@ from .models import (
     DiscoveryRunStatus,
     EnrichmentRun,
     EnrichmentRunStatus,
+    MatchMethod,
     ProviderResult,
     ProviderResultStatus,
     SourceRecord,
@@ -44,11 +46,16 @@ from .models import (
     SuppressionEntry,
 )
 
+
 @dataclass
 class _EffectiveSourcePolicy:
     source_key: str
     max_records: int | None
     budget_cents: int | None
+    reliability_weight: int = 50
+    timeout_seconds: int = 30
+    max_retries: int = 2
+    priority: int = 100
 
 
 def start_run(
@@ -104,7 +111,15 @@ def _get_effective_source_policies(version: HuntProfileVersion) -> list[_Effecti
     if not all_policies.exists():
         return [_EffectiveSourcePolicy("demo", None, None)] if settings.TESTING else []
     return [
-        _EffectiveSourcePolicy(p.source_key, p.max_records, p.budget_cents)
+        _EffectiveSourcePolicy(
+            p.source_key,
+            p.max_records,
+            p.budget_cents,
+            p.reliability_weight,
+            p.timeout_seconds,
+            p.max_retries,
+            p.priority,
+        )
         for p in all_policies.filter(is_enabled=True).order_by("priority", "source_key")
     ]
 
@@ -144,6 +159,15 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
             provider_key=policy.source_key,
             defaults={
                 "query_snapshot": {**base_query, "limit": policy.max_records},
+                "policy_snapshot": {
+                    "source_key": policy.source_key,
+                    "max_records": policy.max_records,
+                    "budget_cents": policy.budget_cents,
+                    "reliability_weight": policy.reliability_weight,
+                    "timeout_seconds": policy.timeout_seconds,
+                    "max_retries": policy.max_retries,
+                    "priority": policy.priority,
+                },
                 "max_records": policy.max_records,
                 "budget_cents": policy.budget_cents,
             },
@@ -211,7 +235,8 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         results = adapter.search(execution.query_snapshot)
     except SoftTimeLimitExceeded:
         return _finish_provider_failure(
-            execution, "Provider execution exceeded its configured deadline.",
+            execution,
+            "Provider execution exceeded its configured deadline.",
             status=ProviderResultStatus.TIMED_OUT,
         )
     except Exception as exc:  # noqa: BLE001 - source failure is persisted and isolated
@@ -225,7 +250,10 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
 
     execution.refresh_from_db(fields=["status"])
     run.refresh_from_db(fields=["status"])
-    if execution.status == ProviderResultStatus.CANCELED or run.status == DiscoveryRunStatus.CANCELED:
+    if (
+        execution.status == ProviderResultStatus.CANCELED
+        or run.status == DiscoveryRunStatus.CANCELED
+    ):
         execution.status = ProviderResultStatus.CANCELED
         execution.finished_at = timezone.now()
         execution.save(update_fields=["status", "finished_at", "updated_at"])
@@ -399,14 +427,59 @@ def _deduplicate(run: DiscoveryRun) -> None:
 
         external_id = record.normalized_data.get("external_id", "")
         external_ids = {record.source_key: external_id} if external_id else {}
-        org, created = create_organization(
-            workspace, name=name, domain=domain, external_ids=external_ids
-        )
+        org = None
+        method = ""
+        confidence = None
+        explanation = ""
+        if external_ids:
+            org = Organization.objects.filter(
+                workspace=workspace, external_ids__contains=external_ids
+            ).first()
+            if org:
+                method = MatchMethod.PROVIDER_ID
+                confidence = 1
+                explanation = f"Exact {record.source_key} provider identifier match."
+        if org is None and domain:
+            org = Organization.objects.filter(
+                workspace=workspace, dedupe_key=normalize_domain(domain)
+            ).first()
+            if org:
+                method = MatchMethod.DOMAIN
+                confidence = 1
+                explanation = "Exact normalized domain match."
+        if org is None and not domain and name:
+            name_matches = Organization.objects.filter(workspace=workspace, name__iexact=name)[:2]
+            matches = list(name_matches)
+            if len(matches) == 1:
+                org = matches[0]
+                method = MatchMethod.EXACT_NAME
+                confidence = 0.65
+                explanation = "Single exact case-insensitive name match; no domain was available."
+        created = org is None
+        if created:
+            org, _ = create_organization(
+                workspace, name=name, domain=domain, external_ids=external_ids
+            )
+            method = MatchMethod.CREATED
+            confidence = 1
+            explanation = "No existing deterministic or unique exact-name match was found."
         record.organization = org
+        record.match_method = method
+        record.match_confidence = confidence
+        record.match_explanation = explanation
         if not created:
             record.status = SourceRecordStatus.DUPLICATE
             deduplicated_count += 1
-        record.save(update_fields=["organization", "status", "updated_at"])
+        record.save(
+            update_fields=[
+                "organization",
+                "status",
+                "match_method",
+                "match_confidence",
+                "match_explanation",
+                "updated_at",
+            ]
+        )
         if external_ids:
             merged_external_ids = {**org.external_ids, **external_ids}
             if merged_external_ids != org.external_ids:
@@ -482,7 +555,8 @@ def _collect_evidence(run: DiscoveryRun) -> None:
         source_type = SourceType.OTHER
         record_evidence(
             org,
-            source_url=record.raw_payload.get("source_url") or (f"https://{domain}" if domain else ""),
+            source_url=record.raw_payload.get("source_url")
+            or (f"https://{domain}" if domain else ""),
             source_type=source_type,
             observed_date=timezone.now().date(),
             excerpt=f"Discovered via {record.source_key} ({name})",

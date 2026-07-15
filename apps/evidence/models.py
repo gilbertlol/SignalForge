@@ -124,6 +124,17 @@ class OrganizationClaim(BaseModel):
         ]
         indexes = [models.Index(fields=["organization", "field_name"])]
 
+    def save(self, *args, **kwargs):
+        if not self._state.adding and type(self).all_objects.filter(pk=self.pk).exists():
+            raise ValidationError("Organization claims are immutable; create a new claim instead.")
+        if self.workspace_id != self.organization.workspace_id:
+            raise ValidationError("Claim and organization must share a workspace.")
+        if self.workspace_id != self.source_record.discovery_run.workspace_id:
+            raise ValidationError("Claim and source record must share a workspace.")
+        if self.source_record.organization_id != self.organization_id:
+            raise ValidationError("Claim organization must match its source record.")
+        return super().save(*args, **kwargs)
+
 
 class OrganizationFieldResolution(BaseModel):
     """Explainable current choice among an organization's immutable claims."""

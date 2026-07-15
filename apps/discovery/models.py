@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import BaseModel, WorkspaceScopedModel
@@ -28,6 +29,13 @@ class SourceRecordStatus(models.TextChoices):
     QUALIFIED = "qualified", "Qualified"
     REJECTED = "rejected", "Rejected"
     FAILED = "failed", "Failed"
+
+
+class MatchMethod(models.TextChoices):
+    CREATED = "created", "New organization"
+    PROVIDER_ID = "provider_id", "Provider identifier"
+    DOMAIN = "domain", "Normalized domain"
+    EXACT_NAME = "exact_name", "Exact normalized name"
 
 
 class ProviderResultStatus(models.TextChoices):
@@ -117,6 +125,9 @@ class SourceRecord(BaseModel):
     organization = models.ForeignKey(
         Organization, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
+    match_method = models.CharField(max_length=20, choices=MatchMethod.choices, blank=True)
+    match_confidence = models.DecimalField(max_digits=4, decimal_places=3, null=True, blank=True)
+    match_explanation = models.TextField(blank=True)
     failure_reason = models.TextField(blank=True)
 
     class Meta:
@@ -132,6 +143,34 @@ class SourceRecord(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.source_key}:{self.external_id or self.id}"
+
+    def save(self, *args, **kwargs):
+        immutable_fields = (
+            "discovery_run_id",
+            "provider_result_id",
+            "source_key",
+            "external_id",
+            "raw_payload",
+        )
+        if not self._state.adding:
+            update_fields = kwargs.get("update_fields")
+            checked_fields = immutable_fields
+            if update_fields is not None:
+                checked_fields = tuple(
+                    field
+                    for field in immutable_fields
+                    if field.removesuffix("_id") in update_fields
+                )
+            if checked_fields:
+                original = type(self).all_objects.get(pk=self.pk)
+                if any(
+                    getattr(original, field) != getattr(self, field) for field in checked_fields
+                ):
+                    raise ValidationError("Raw source identity and payload are immutable.")
+        if self.organization_id:
+            if self.organization.workspace_id != self.discovery_run.workspace_id:
+                raise ValidationError("Source record and organization must share a workspace.")
+        return super().save(*args, **kwargs)
 
 
 class EnrichmentRun(BaseModel):
@@ -162,6 +201,7 @@ class ProviderResult(BaseModel):
         max_length=20, choices=ProviderResultStatus.choices, default=ProviderResultStatus.QUEUED
     )
     query_snapshot = models.JSONField(default=dict, blank=True)
+    policy_snapshot = models.JSONField(default=dict, blank=True)
     max_records = models.IntegerField(null=True, blank=True)
     budget_cents = models.IntegerField(null=True, blank=True)
     attempt_count = models.PositiveIntegerField(default=0)

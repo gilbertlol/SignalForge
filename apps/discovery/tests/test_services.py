@@ -1,9 +1,11 @@
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ValidationError
 
 from apps.discovery.models import (
     DiscoveryRunStatus,
+    MatchMethod,
     ProviderResultStatus,
     SourceRecordStatus,
 )
@@ -92,6 +94,8 @@ def test_duplicate_provider_task_delivery_does_not_duplicate_records_or_cost():
     assert execution.records_returned == 5
     assert execution.cost_cents == 50
     assert execution.attempt_count == 1
+    assert execution.policy_snapshot["source_key"] == "demo"
+    assert execution.policy_snapshot["timeout_seconds"] == 30
 
 
 def test_rerunning_the_same_source_via_a_new_run_does_not_duplicate_organizations():
@@ -246,6 +250,14 @@ def test_multiple_sources_merge_with_claim_provenance_and_conflicts():
     assert run.source_records.count() == 2
     assert OrganizationClaim.objects.filter(organization=organization).count() == 10
     assert organization.external_ids == {"source-a": "a-1", "source-b": "b-9"}
+    records = list(run.source_records.order_by("created_at"))
+    assert {record.match_method for record in records} == {
+        MatchMethod.CREATED,
+        MatchMethod.DOMAIN,
+    }
+    domain_match = next(record for record in records if record.match_method == MatchMethod.DOMAIN)
+    assert domain_match.match_confidence == 1
+    assert "normalized domain" in domain_match.match_explanation
 
     headcount = OrganizationFieldResolution.objects.get(
         organization=organization, field_name="employee_count"
@@ -257,6 +269,41 @@ def test_multiple_sources_merge_with_claim_provenance_and_conflicts():
     assert headcount.has_conflict is False
     assert industry.distinct_value_count == 2
     assert industry.has_conflict is True
+
+    record = records[0]
+    record.raw_payload = {"tampered": True}
+    with pytest.raises(ValidationError, match="immutable"):
+        record.save()
+
+    claim = OrganizationClaim.objects.filter(organization=organization).first()
+    claim.value = "tampered"
+    with pytest.raises(ValidationError, match="immutable"):
+        claim.save()
+
+
+def test_provider_identifier_merges_domainless_records_across_runs():
+    class Adapter:
+        def search(self, _query):
+            return [{"id": "stable-42", "name": "Domainless Company"}]
+
+    profile = HuntProfileFactory()
+    version = _version(
+        profile,
+        source_policies=[{"source_key": "stable-source"}],
+        result_threshold={"min_total_score": 0},
+    )
+
+    with patch("apps.discovery.services.get_lead_source_adapter", return_value=Adapter()):
+        first_run = start_run(version, trigger="manual")
+        execute_run(first_run)
+        second_run = start_run(version, trigger="manual")
+        execute_run(second_run)
+
+    assert Organization.objects.filter(workspace=profile.workspace).count() == 1
+    second_record = second_run.source_records.get()
+    assert second_record.match_method == MatchMethod.PROVIDER_ID
+    assert second_record.match_confidence == 1
+    assert "provider identifier" in second_record.match_explanation
 
 
 def test_suppressed_domain_blocks_organization_creation():

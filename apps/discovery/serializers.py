@@ -22,6 +22,9 @@ class SourceRecordSerializer(serializers.ModelSerializer):
             "normalized_data",
             "status",
             "organization",
+            "match_method",
+            "match_confidence",
+            "match_explanation",
             "failure_reason",
             "created_at",
         ]
