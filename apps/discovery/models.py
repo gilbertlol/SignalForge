@@ -50,6 +50,7 @@ class ProviderResultStatus(models.TextChoices):
     RATE_LIMITED = "rate_limited", "Rate limited"
     CANCELED = "canceled", "Canceled"
     BUDGET_BLOCKED = "budget_blocked", "Budget blocked"
+    SKIPPED = "skipped", "Skipped — unavailable"
 
 
 class EnrichmentRunStatus(models.TextChoices):

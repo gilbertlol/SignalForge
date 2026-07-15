@@ -321,6 +321,30 @@
   border-radius: 12px;
 }
 
+.hunt-builder-panel .provider-card.unavailable {
+  opacity: 0.58;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.hunt-builder-panel .provider-card.unavailable:hover { opacity: 0.8; }
+
+.source-availability {
+  display: inline-flex;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  border: 1px solid rgba(229, 191, 105, 0.22);
+  border-radius: 999px;
+  color: var(--warning);
+  font-size: 9px;
+}
+
+.source-availability.ready {
+  border-color: rgba(116, 201, 182, 0.28);
+  color: var(--teal);
+}
+
+.provider-card :disabled { cursor: not-allowed; }
+
 .builder-submit {
   border-top: 1px solid var(--line);
 }

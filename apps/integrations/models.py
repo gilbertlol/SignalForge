@@ -70,6 +70,24 @@ class LeadSourceConfiguration(WorkspaceScopedModel):
         ]
 
 
+class LeadSourceHealthStatus(models.TextChoices):
+    READY = "ready", "Ready"
+    AUTH_FAILED = "auth_failed", "Authentication failed"
+    RATE_LIMITED = "rate_limited", "Rate limited"
+    QUOTA_EXHAUSTED = "quota_exhausted", "Quota exhausted"
+    UNAVAILABLE = "unavailable", "Unavailable"
+
+
+class LeadSourceHealthCheck(WorkspaceScopedModel):
+    configuration = models.ForeignKey(
+        LeadSourceConfiguration, on_delete=models.CASCADE, related_name="health_checks"
+    )
+    status = models.CharField(max_length=30, choices=LeadSourceHealthStatus.choices)
+    was_successful = models.BooleanField(default=False)
+    latency_ms = models.PositiveIntegerField(default=0)
+    sanitized_error = models.CharField(max_length=255, blank=True)
+
+
 class AIEndpoint(WorkspaceScopedModel):
     provider = models.ForeignKey(AIProvider, on_delete=models.CASCADE, related_name="endpoints")
     name = models.CharField(max_length=255)

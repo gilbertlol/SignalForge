@@ -43,6 +43,25 @@ def _always_matches_domain():
     }
 
 
+def test_unvalidated_paid_source_is_skipped_while_open_source_stays_queued():
+    profile = HuntProfileFactory()
+    version = create_version(
+        profile,
+        criteria=_always_matches_domain(),
+        source_policies=[
+            {"source_key": "openstreetmap", "max_records": 5},
+            {"source_key": "apollo", "max_records": 5},
+        ],
+    )
+    run = start_run(version, trigger="manual")
+
+    executions = {item.provider_key: item for item in prepare_provider_executions(run)}
+
+    assert executions["openstreetmap"].status == ProviderResultStatus.QUEUED
+    assert executions["apollo"].status == ProviderResultStatus.SKIPPED
+    assert "API key not configured" in executions["apollo"].error
+
+
 def _version(profile, **kwargs):
     return create_version(profile, criteria=_always_matches_domain(), **kwargs)
 

@@ -28,6 +28,7 @@ from apps.integrations.registry import (
     get_technology_detection_adapter,
     get_website_analysis_adapter,
 )
+from apps.integrations.services import lead_source_availability, record_lead_source_outcome
 from apps.organizations.models import Organization
 from apps.organizations.services import create_organization, normalize_domain
 from apps.scoring.models import ScoreFamily
@@ -185,6 +186,16 @@ def prepare_provider_executions(run: DiscoveryRun) -> list[ProviderResult]:
                 "budget_cents": policy.budget_cents,
             },
         )
+        if execution.status == ProviderResultStatus.QUEUED and policy.source_key in {
+            "apollo",
+            "google_places",
+        }:
+            availability = lead_source_availability(run.workspace, policy.source_key)
+            if not availability.ready:
+                execution.status = ProviderResultStatus.SKIPPED
+                execution.error = f"Unavailable at dispatch: {availability.reason}."
+                execution.finished_at = timezone.now()
+                execution.save(update_fields=["status", "error", "finished_at", "updated_at"])
         executions.append(execution)
     return executions
 
@@ -211,6 +222,7 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
             ProviderResultStatus.PARTIAL,
             ProviderResultStatus.BUDGET_BLOCKED,
             ProviderResultStatus.CANCELED,
+            ProviderResultStatus.SKIPPED,
         }:
             return execution
         if execution.discovery_run.status == DiscoveryRunStatus.CANCELED:
@@ -254,12 +266,17 @@ def execute_provider_search(provider_result_id) -> ProviderResult:
         )
     except Exception as exc:  # noqa: BLE001 - source failure is persisted and isolated
         error = str(exc)
+        if policy.source_key in {"apollo", "google_places"}:
+            record_lead_source_outcome(run.workspace, policy.source_key, error)
         status = (
             ProviderResultStatus.RATE_LIMITED
             if "rate limit" in error.lower()
             else ProviderResultStatus.FAILED
         )
         return _finish_provider_failure(execution, error, status=status)
+
+    if policy.source_key in {"apollo", "google_places"}:
+        record_lead_source_outcome(run.workspace, policy.source_key)
 
     execution.refresh_from_db(fields=["status"])
     run.refresh_from_db(fields=["status"])

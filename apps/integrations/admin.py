@@ -7,6 +7,7 @@ from .models import (
     CredentialReference,
     FallbackPolicy,
     LeadSourceConfiguration,
+    LeadSourceHealthCheck,
     ModelCapability,
     ModelDefinition,
     ModelInvocation,
@@ -61,5 +62,6 @@ for model in (
     ModelInvocation,
     ProviderHealthCheck,
     LeadSourceConfiguration,
+    LeadSourceHealthCheck,
 ):
     admin.site.register(model)

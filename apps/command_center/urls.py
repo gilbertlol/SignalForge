@@ -24,8 +24,15 @@ urlpatterns = [
     ),
     path(
         "settings/lead-sources/apollo/test/",
-        views.test_apollo_connection,
+        views.test_lead_source_connection,
+        {"source_key": "apollo"},
         name="test-apollo",
+    ),
+    path(
+        "settings/lead-sources/google-places/test/",
+        views.test_lead_source_connection,
+        {"source_key": "google_places"},
+        name="test-google-places",
     ),
     path("settings/endpoints/new/", views.create_endpoint, name="create-endpoint"),
     path("settings/models/new/", views.create_model, name="create-model"),

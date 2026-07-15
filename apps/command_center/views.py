@@ -42,7 +42,11 @@ from apps.integrations.models import (
     ModelDefinition,
 )
 from apps.integrations.registry import get_lead_source_adapter
-from apps.integrations.services import check_provider
+from apps.integrations.services import (
+    check_lead_source,
+    check_provider,
+    lead_source_availability,
+)
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
 from apps.organizations.services import create_organization
@@ -190,6 +194,11 @@ def hunt_profiles(request: HttpRequest) -> HttpResponse:
 
 @workspace_permission("prospects.access")
 def create_hunt_profile(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    source_availability = {
+        key: lead_source_availability(workspace, key)
+        for key in ("openstreetmap", "apollo", "google_places")
+    }
     presets = list(HuntPreset.objects.filter(is_active=True).order_by("name", "-version"))
     selected_preset = None
     initial = None
@@ -206,9 +215,17 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
                 "name": selected_preset.name,
                 "description": selected_preset.description,
             }
+            for key in ("apollo", "google_places"):
+                if not source_availability[key].ready:
+                    initial[f"use_{key}"] = False
+            if not any(
+                initial.get(f"use_{key}") for key in ("openstreetmap", "apollo", "google_places")
+            ):
+                initial["manual_only"] = True
     form = HuntProfileForm(
         request.POST if request.method == "POST" else None,
         initial=initial,
+        source_availability=source_availability,
     )
     form_valid = form.is_valid() if request.method == "POST" else False
     if request.method == "POST" and form.cleaned_data.get("preset"):
@@ -216,13 +233,12 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
     for preset in presets:
         preset.source_statuses = []
         for guidance in preset.source_guidance:
-            adapter = get_lead_source_adapter(
-                guidance["source_key"], workspace=get_request_workspace(request)
-            )
+            availability = lead_source_availability(workspace, guidance["source_key"])
             preset.source_statuses.append(
                 {
                     **guidance,
-                    "available": bool(adapter and adapter.is_configured()),
+                    "available": availability.ready,
+                    "availability_reason": availability.reason,
                 }
             )
     display_preset = next(
@@ -230,7 +246,6 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
         presets[0] if presets else None,
     )
     if request.method == "POST" and form_valid:
-        workspace = get_request_workspace(request)
         profile = HuntProfile.objects.create(
             workspace=workspace,
             name=form.cleaned_data["name"],
@@ -285,6 +300,8 @@ def create_hunt_profile(request: HttpRequest) -> HttpResponse:
             "presets": presets,
             "selected_preset": selected_preset,
             "display_preset": display_preset,
+            "apollo_availability": source_availability["apollo"],
+            "google_places_availability": source_availability["google_places"],
         },
     )
 
@@ -320,15 +337,19 @@ def start_discovery(request: HttpRequest, pk) -> HttpResponse:
             request, "This is a manual/CSV-only profile; it has no automatic source to run."
         )
         return redirect("command_center:hunt-profiles")
-    for policy in policies:
-        adapter = get_lead_source_adapter(policy.source_key, workspace=profile.workspace)
-        if adapter is None or not adapter.is_configured():
-            messages.error(
-                request,
-                f"Discovery was not started: lead source “{policy.source_key}” is not configured. "
-                "Ask a workspace provider administrator to enable it.",
-            )
-            return redirect("command_center:hunt-profiles")
+    usable = [
+        policy
+        for policy in policies
+        if policy.source_key not in {"apollo", "google_places"}
+        or lead_source_availability(profile.workspace, policy.source_key).ready
+    ]
+    if not usable:
+        messages.error(
+            request,
+            "Discovery was not started because none of this profile’s sources are currently "
+            "available. Enable an open source or validate a customer API key.",
+        )
+        return redirect("command_center:hunt-profiles")
     run = start_run(
         profile.current_version,
         trigger=DiscoveryRunTrigger.MANUAL,
@@ -379,6 +400,8 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
     lead_sources = list(LeadSourceConfiguration.objects.filter(workspace=workspace))
     apollo = next((source for source in lead_sources if source.source_key == "apollo"), None)
     google = next((source for source in lead_sources if source.source_key == "google_places"), None)
+    apollo_availability = lead_source_availability(workspace, "apollo")
+    google_availability = lead_source_availability(workspace, "google_places")
     source_catalog = [
         {
             "name": "OpenStreetMap",
@@ -400,13 +423,7 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
         {
             "name": "Apollo Organization Search",
             "source_key": "apollo",
-            "state": "Ready for live searches"
-            if apollo and apollo.enabled and apollo.credential_id
-            else (
-                "Disabled"
-                if apollo and not apollo.enabled
-                else "API key and compatible Apollo plan required"
-            ),
+            "state": apollo_availability.reason,
             "cost": f"Estimated {apollo.estimated_cost_per_page_cents}¢ per returned page"
             if apollo
             else "Plan-dependent credit usage",
@@ -415,15 +432,13 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             ),
             "capabilities": "Organization filters, domains, industries and company metadata",
             "attribution": "Commercial provider data · subject to your Apollo plan and terms",
-            "ready": bool(apollo and apollo.enabled and apollo.credential_id),
+            "ready": apollo_availability.ready,
             "configuration": apollo,
         },
         {
             "name": "Google Places",
             "source_key": "google_places",
-            "state": "Ready for live searches"
-            if google and google.enabled and google.config.get("storage_permitted")
-            else "Key and storage agreement attestation required",
+            "state": google_availability.reason,
             "cost": f"Estimated {google.estimated_cost_per_page_cents}¢ per page"
             if google
             else "Field-mask dependent billing",
@@ -434,7 +449,8 @@ def provider_settings(request: HttpRequest) -> HttpResponse:
             ),
             "attribution": "Google Maps content · storage restricted by Google Maps Platform terms",
             "attribution_url": "https://developers.google.com/maps/documentation/places/web-service/policies",
-            "ready": bool(google and google.enabled and google.config.get("storage_permitted")),
+            "ready": google_availability.ready,
+            "configuration": google,
         },
     ]
     return _render(
@@ -508,6 +524,7 @@ def configure_apollo(request: HttpRequest) -> HttpResponse:
         ]
         configuration.enabled = form.cleaned_data["enabled"]
         configuration.save()
+        configuration.health_checks.all().delete()
     else:
         credential = CredentialReference(workspace=workspace, name="Apollo API key")
         credential.set_secret(form.cleaned_data["api_key"])
@@ -547,6 +564,7 @@ def configure_google_places(request: HttpRequest) -> HttpResponse:
         old_credential = configuration.credential
         configuration.credential = credential
         old_credential.delete()
+        configuration.health_checks.all().delete()
     configuration.base_url = "https://places.googleapis.com/v1/places:searchText"
     configuration.timeout_seconds = form.cleaned_data["timeout_seconds"]
     configuration.estimated_cost_per_page_cents = form.cleaned_data["estimated_cost_per_page_cents"]
@@ -559,21 +577,22 @@ def configure_google_places(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 @workspace_permission("providers.manage")
-def test_apollo_connection(request: HttpRequest) -> HttpResponse:
+def test_lead_source_connection(request: HttpRequest, source_key: str) -> HttpResponse:
     workspace = get_request_workspace(request)
-    adapter = get_lead_source_adapter("apollo", workspace=workspace)
-    if adapter is None or not adapter.is_configured():
-        messages.error(request, "Apollo is not configured and enabled for this workspace.")
+    configuration = LeadSourceConfiguration.objects.filter(
+        workspace=workspace, source_key=source_key, enabled=True
+    ).first()
+    display_name = "Google Places" if source_key == "google_places" else "Apollo"
+    if configuration is None:
+        messages.error(request, f"{display_name} is not configured and enabled.")
         return redirect("command_center:provider-settings")
-
-    try:
-        results = adapter.search({"limit": 1})
-    except Exception as exc:  # noqa: BLE001 - adapters expose sanitized provider errors
-        messages.error(request, f"Apollo connection failed: {exc}")
+    result = check_lead_source(configuration)
+    if result.was_successful:
+        messages.success(request, f"{display_name} connection passed and is selectable.")
     else:
-        messages.success(
+        messages.error(
             request,
-            f"Apollo connection passed ({len(results)} validation result(s) returned).",
+            f"{display_name} validation failed: {result.get_status_display()}.",
         )
     return redirect("command_center:provider-settings")
 
@@ -667,6 +686,7 @@ def _run_monitor_context(request: HttpRequest) -> dict:
         ProviderResultStatus.TIMED_OUT,
         ProviderResultStatus.CANCELED,
         ProviderResultStatus.BUDGET_BLOCKED,
+        ProviderResultStatus.SKIPPED,
     }
     run_terminal = {
         DiscoveryRunStatus.SUCCEEDED,

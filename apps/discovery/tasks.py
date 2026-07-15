@@ -25,9 +25,13 @@ def run_discovery_task(discovery_run_id: str) -> str:
         run.refresh_from_db()
         return run.status
 
-    policies = {p.source_key: p for p in run.hunt_profile_version.source_policies.filter(is_enabled=True)}
+    policies = {
+        p.source_key: p for p in run.hunt_profile_version.source_policies.filter(is_enabled=True)
+    }
     header = []
     for execution in executions:
+        if execution.status == "skipped":
+            continue
         policy = policies.get(execution.provider_key)
         signature = run_provider_task.s(str(execution.id))
         if policy:
@@ -37,7 +41,10 @@ def run_discovery_task(discovery_run_id: str) -> str:
                 priority=max(0, min(9, 9 - min(policy.priority, 9))),
             )
         header.append(signature)
-    chord(header)(finalize_discovery_task.s(str(run.id)))
+    if header:
+        chord(header)(finalize_discovery_task.s(str(run.id)))
+    else:
+        finalize_run(run.id)
     run.refresh_from_db()
     return run.status
 
@@ -51,11 +58,15 @@ def run_provider_task(self, provider_result_id: str) -> str:
     policy = execution.discovery_run.hunt_profile_version.source_policies.filter(
         source_key=execution.provider_key, is_enabled=True
     ).first()
-    if execution.status in {"failed", "rate_limited"} and policy and execution.attempt_count <= policy.max_retries:
+    if (
+        execution.status in {"failed", "rate_limited"}
+        and policy
+        and execution.attempt_count <= policy.max_retries
+    ):
         execution.status = "retrying"
         execution.save(update_fields=["status", "updated_at"])
         raise self.retry(
-            countdown=min(60, 2 ** execution.attempt_count),
+            countdown=min(60, 2**execution.attempt_count),
             max_retries=policy.max_retries,
         )
     return str(execution.id)

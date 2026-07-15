@@ -24,6 +24,8 @@ from apps.integrations.models import (
     AIProvider,
     CredentialReference,
     LeadSourceConfiguration,
+    LeadSourceHealthCheck,
+    LeadSourceHealthStatus,
     ProviderHealthCheck,
 )
 from apps.opportunities.tests.factories import OpportunityFactory
@@ -31,6 +33,27 @@ from apps.organizations.models import Organization
 from apps.organizations.tests.factories import OrganizationFactory
 
 pytestmark = pytest.mark.django_db
+
+
+def validated_lead_source(workspace, source_key):
+    credential = CredentialReference.objects.create(
+        workspace=workspace, name=f"{source_key} key", encrypted_value="opaque-test-secret"
+    )
+    configuration = LeadSourceConfiguration.objects.create(
+        workspace=workspace,
+        source_key=source_key,
+        name=source_key,
+        credential=credential,
+        enabled=True,
+        config={"storage_permitted": True},
+    )
+    LeadSourceHealthCheck.objects.create(
+        workspace=workspace,
+        configuration=configuration,
+        status=LeadSourceHealthStatus.READY,
+        was_successful=True,
+    )
+    return configuration
 
 
 def test_command_center_requires_login(client):
@@ -121,10 +144,11 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     )
 
     assert response.status_code == 200
-    assert response.context["form"].initial["use_google_places"] is True
+    assert response.context["form"].initial["use_google_places"] is False
     assert response.context["form"].initial["use_openstreetmap"] is True
     assert response.context["form"].initial["google_places_budget_cents"] == 25
     assert response.context["form"].initial["google_places_reliability_weight"] == 80
+    assert response.context["form"].fields["use_google_places"].disabled is True
     assert b"corporate_registry" in response.content
     assert b"setup needed" in response.content
     assert b"change everything afterward" in response.content
@@ -138,7 +162,7 @@ def test_preset_prefills_editable_builder_and_explains_missing_sources(client):
     assert b'type="hidden" name="center_latitude"' in response.content
 
 
-def test_radius_location_requires_google_places_and_complete_coordinates():
+def test_openstreetmap_radius_requires_complete_coordinates():
     form = HuntProfileForm(
         {
             "name": "Radius hunt",
@@ -151,8 +175,6 @@ def test_radius_location_requires_google_places_and_complete_coordinates():
     )
 
     assert form.is_valid() is False
-    assert "use_openstreetmap" in form.errors
-    assert "use_google_places" in form.errors
     assert "center_latitude" in form.errors
 
 
@@ -209,6 +231,7 @@ def test_applying_preset_copies_values_and_later_preset_changes_do_not_mutate_pr
 
 def test_funded_growth_preset_defaults_create_a_profile(client):
     user = UserFactory()
+    validated_lead_source(user.memberships.get().workspace, "apollo")
     client.force_login(user)
     preset = HuntPreset.objects.get(key="funded-growing-companies", version=1)
 
@@ -327,29 +350,15 @@ def test_profile_without_source_policies_is_not_runnable(mock_delay, client):
     mock_delay.assert_not_called()
 
 
-@patch("apps.command_center.views.run_discovery_task.delay")
-def test_start_discovery_rejects_unconfigured_live_source(mock_delay, client):
+def test_builder_disables_unvalidated_paid_source(client):
     user = UserFactory()
     client.force_login(user)
-    client.post(
-        reverse("command_center:create-hunt-profile"),
-        {
-            "name": "Needs Apollo",
-            "minimum_score": 1,
-            "use_apollo": "on",
-            "apollo_max_records": 5,
-        },
-    )
-    profile = HuntProfile.objects.get(name="Needs Apollo")
 
-    response = client.post(
-        reverse("command_center:start-discovery", kwargs={"pk": profile.pk}), follow=True
-    )
+    response = client.get(reverse("command_center:create-hunt-profile"))
 
     assert response.status_code == 200
-    assert b"Apollo" in response.content
-    assert not profile.current_version.discovery_runs.exists()
-    mock_delay.assert_not_called()
+    assert response.context["form"].fields["use_apollo"].disabled is True
+    assert b"Configure and validate Apollo" in response.content
 
 
 def test_run_monitor_renders_independent_provider_outcomes(client):
@@ -413,6 +422,7 @@ def test_cancel_run_marks_nonterminal_sources_canceled(client):
 
 def test_create_hunt_profile_persists_independent_multi_source_policies(client):
     user = UserFactory()
+    validated_lead_source(user.memberships.get().workspace, "apollo")
     client.force_login(user)
 
     response = client.post(
@@ -651,10 +661,21 @@ def test_apollo_configuration_is_workspace_scoped_and_rotates_secret(client):
     assert "rotated-apollo-key" not in configuration.credential.encrypted_value
 
 
-@patch("apps.command_center.views.get_lead_source_adapter")
+@override_settings(SIGNALFORGE_CREDENTIAL_KEY="command-center-test-key-at-least-32-characters")
+@patch("apps.integrations.services.get_lead_source_adapter")
 def test_apollo_live_validation_reports_success(mock_get_adapter, client):
     user = UserFactory()
     grant_provider_management(user)
+    workspace = user.memberships.get().workspace
+    credential = CredentialReference(workspace=workspace, name="Apollo key")
+    credential.set_secret("valid-apollo-key")
+    credential.save()
+    configuration = LeadSourceConfiguration.objects.create(
+        workspace=workspace,
+        source_key="apollo",
+        name="Apollo",
+        credential=credential,
+    )
     client.force_login(user)
     adapter = mock_get_adapter.return_value
     adapter.is_configured.return_value = True
@@ -665,6 +686,7 @@ def test_apollo_live_validation_reports_success(mock_get_adapter, client):
     assert response.status_code == 200
     assert b"Apollo connection passed" in response.content
     adapter.search.assert_called_once_with({"limit": 1})
+    assert configuration.health_checks.get().was_successful is True
 
 
 def test_endpoint_creation_rejects_cross_workspace_provider(client):

@@ -17,7 +17,7 @@
       <div><strong>Cost & limits</strong><small>{{ source.cost }}</small><small>{{ source.limits }}</small></div>
       <div><strong>Data terms</strong><small>{% if source.attribution_url %}<a href="{{ source.attribution_url }}" target="_blank" rel="noreferrer">{{ source.attribution }}</a>{% else %}{{ source.attribution }}{% endif %}</small></div>
     </div>
-    {% if source.source_key == "apollo" and source.ready %}<form method="post" action="{% url 'command_center:test-apollo' %}">{% csrf_token %}<button class="button secondary">Run live validation</button><small>Performs a real one-result search and may consume credits.</small></form>{% endif %}
+    {% if source.configuration %}<form method="post" action="{% if source.source_key == 'apollo' %}{% url 'command_center:test-apollo' %}{% else %}{% url 'command_center:test-google-places' %}{% endif %}">{% csrf_token %}<button class="button secondary">Run live validation</button><small>Performs a real one-result search and may consume customer credits.</small></form>{% endif %}
   </article>
   {% endfor %}
 </section>

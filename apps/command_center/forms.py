@@ -79,8 +79,28 @@ class HuntProfileForm(forms.Form):
     max_retries = forms.IntegerField(min_value=0, max_value=10, initial=2, required=False)
     activate_now = forms.BooleanField(required=False, initial=True)
 
+    def __init__(self, *args, source_availability=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.source_availability = source_availability or {}
+        for key in ("apollo", "google_places"):
+            availability = self.source_availability.get(key)
+            if availability is None or availability.ready:
+                continue
+            self.initial[f"use_{key}"] = False
+            for field_name in (
+                f"use_{key}",
+                f"{key}_max_records",
+                f"{key}_budget_cents",
+                f"{key}_reliability_weight",
+            ):
+                self.fields[field_name].disabled = True
+
     def clean(self):
         cleaned = super().clean()
+        for key in ("apollo", "google_places"):
+            availability = self.source_availability.get(key)
+            if cleaned.get(f"use_{key}") and availability and not availability.ready:
+                self.add_error(f"use_{key}", availability.reason)
         selected = any(
             cleaned.get(key) for key in ("use_openstreetmap", "use_apollo", "use_google_places")
         )
@@ -95,13 +115,13 @@ class HuntProfileForm(forms.Form):
             and not cleaned.get("geographies")
         ):
             self.add_error("geographies", "Add at least one geography for OpenStreetMap.")
-        if location_type == "radius" and cleaned.get("use_openstreetmap"):
+        if location_type == "radius" and not (
+            cleaned.get("use_openstreetmap") or cleaned.get("use_google_places")
+        ):
             self.add_error(
                 "use_openstreetmap",
-                "OpenStreetMap does not support radius searches; use Google Places.",
+                "Select OpenStreetMap or Google Places for a radius search.",
             )
-        if location_type == "radius" and not cleaned.get("use_google_places"):
-            self.add_error("use_google_places", "Select Google Places for a radius search.")
         coordinates = (cleaned.get("center_latitude"), cleaned.get("center_longitude"))
         if any(value is not None for value in coordinates) and not all(
             value is not None for value in coordinates

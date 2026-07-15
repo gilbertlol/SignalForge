@@ -1,6 +1,7 @@
 import json
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -10,6 +11,9 @@ from jsonschema import ValidationError, validate
 
 from .models import (
     InvocationStatus,
+    LeadSourceConfiguration,
+    LeadSourceHealthCheck,
+    LeadSourceHealthStatus,
     ModelDefinition,
     ModelInvocation,
     ModelRoute,
@@ -17,7 +21,7 @@ from .models import (
     ProviderHealthCheck,
     UsagePolicy,
 )
-from .registry import get_ai_model_adapter
+from .registry import get_ai_model_adapter, get_lead_source_adapter
 
 
 class GatewayError(RuntimeError):
@@ -29,6 +33,88 @@ class GatewayResult:
     text: str
     parsed: Any
     invocation: ModelInvocation
+
+
+@dataclass(frozen=True)
+class SourceAvailability:
+    source_key: str
+    ready: bool
+    reason: str
+    is_paid: bool
+
+
+def lead_source_availability(workspace, source_key: str) -> SourceAvailability:
+    if source_key == "openstreetmap":
+        return SourceAvailability(source_key, True, "Free open source · ready", False)
+    if source_key in {"manual", "csv_import"}:
+        return SourceAvailability(source_key, True, "Local input · ready", False)
+    configuration = LeadSourceConfiguration.objects.filter(
+        workspace=workspace, source_key=source_key, enabled=True
+    ).first()
+    if configuration is None:
+        return SourceAvailability(source_key, False, "API key not configured", True)
+    latest = configuration.health_checks.order_by("-created_at").first()
+    if latest is None:
+        return SourceAvailability(source_key, False, "Run live validation first", True)
+    if latest.created_at < timezone.now() - timedelta(hours=24):
+        return SourceAvailability(source_key, False, "Validation expired · test again", True)
+    if not latest.was_successful:
+        return SourceAvailability(source_key, False, latest.get_status_display(), True)
+    return SourceAvailability(source_key, True, "Customer API key validated", True)
+
+
+def check_lead_source(configuration: LeadSourceConfiguration) -> LeadSourceHealthCheck:
+    started = time.monotonic()
+    adapter = get_lead_source_adapter(configuration.source_key, workspace=configuration.workspace)
+    status = LeadSourceHealthStatus.READY
+    error = ""
+    try:
+        if adapter is None or not adapter.is_configured():
+            raise GatewayError("Provider is not configured")
+        query = (
+            {"keyword": "business", "geographies": ["Montreal"], "limit": 1}
+            if configuration.source_key == "google_places"
+            else {"limit": 1}
+        )
+        adapter.search(query)
+    except Exception as exc:  # noqa: BLE001 - provider details are categorized and not persisted
+        status = _lead_source_failure_status(str(exc))
+        error = exc.__class__.__name__
+    return LeadSourceHealthCheck.objects.create(
+        workspace=configuration.workspace,
+        configuration=configuration,
+        status=status,
+        was_successful=status == LeadSourceHealthStatus.READY,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        sanitized_error=error,
+    )
+
+
+def _lead_source_failure_status(error: str) -> str:
+    message = error.lower()
+    if any(value in message for value in ("401", "403", "auth", "api key", "denied")):
+        return LeadSourceHealthStatus.AUTH_FAILED
+    if any(value in message for value in ("quota", "credit", "exhaust")):
+        return LeadSourceHealthStatus.QUOTA_EXHAUSTED
+    if any(value in message for value in ("429", "rate limit")):
+        return LeadSourceHealthStatus.RATE_LIMITED
+    return LeadSourceHealthStatus.UNAVAILABLE
+
+
+def record_lead_source_outcome(workspace, source_key: str, error: str = "") -> None:
+    configuration = LeadSourceConfiguration.objects.filter(
+        workspace=workspace, source_key=source_key, enabled=True
+    ).first()
+    if configuration is None:
+        return
+    status = _lead_source_failure_status(error) if error else LeadSourceHealthStatus.READY
+    LeadSourceHealthCheck.objects.create(
+        workspace=workspace,
+        configuration=configuration,
+        status=status,
+        was_successful=not error,
+        sanitized_error="ProviderError" if error else "",
+    )
 
 
 _ALLOWED_PRIVACY: dict[str, set[str]] = {
