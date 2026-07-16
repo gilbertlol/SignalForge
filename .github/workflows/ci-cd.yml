@@ -38,6 +38,7 @@ jobs:
       - name: Test
         run: >-
           docker compose run --rm -e DJANGO_SETTINGS_MODULE=config.settings.test
+          -e SIGNALFORGE_OWNER_EMAIL= -e SIGNALFORGE_OWNER_PASSWORD=
           web pytest -q -o cache_dir=/tmp/pytest-cache
       - name: Container logs on failure
         if: failure()
