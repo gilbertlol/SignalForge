@@ -1,11 +1,12 @@
 from collections.abc import Callable
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 from typing import cast
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -59,6 +60,17 @@ from apps.notifications.services import NotificationPolicyError, acknowledge
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
 from apps.organizations.services import create_organization
+from apps.risk.models import (
+    ControlRecommendation,
+    FactType,
+    ObservationSource,
+    Override,
+    RecommendationStatus,
+    RiskCategory,
+    RiskObservation,
+    RiskProfile,
+)
+from apps.risk.services import calculate_risk, sync_finance_observations
 from apps.tasks.models import AgentExecution, ApprovalRequest, ApprovalStatus, Operator, WorkItem
 
 from .forms import (
@@ -110,6 +122,7 @@ def _navigation(request: HttpRequest) -> dict[str, bool]:
         "users": allowed("users.manage"),
         "agents": allowed("agents.manage"),
         "financials": allowed("financials.access"),
+        "risk": allowed("risk.access"),
     }
 
 
@@ -193,6 +206,174 @@ def finance_dashboard(request: HttpRequest) -> HttpResponse:
             ).select_related("organization")[:20],
         },
     )
+
+
+@workspace_permission("risk.access")
+def risk_portfolio(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    rows = []
+    for profile in RiskProfile.objects.filter(workspace=workspace).select_related(
+        "organization", "opportunity", "contract"
+    ):
+        snapshot = profile.snapshots.first()
+        scores = [Decimal(value) for value in snapshot.category_scores.values()] if snapshot else []
+        rows.append(
+            {
+                "profile": profile,
+                "snapshot": snapshot,
+                "peak_score": max(scores) if scores else None,
+                "pending_controls": profile.recommendations.filter(
+                    status=RecommendationStatus.PROPOSED
+                ).count(),
+            }
+        )
+    return _render(request, "command_center/risk_portfolio.html", {"rows": rows})
+
+
+@require_POST
+@workspace_permission("risk.access")
+def create_risk_profile(request: HttpRequest, organization_pk) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    organization = get_object_or_404(Organization, workspace=workspace, pk=organization_pk)
+    profile, created = RiskProfile.objects.get_or_create(
+        workspace=workspace,
+        organization=organization,
+        opportunity=None,
+        contract=None,
+    )
+    if created:
+        messages.success(request, "Organization risk profile created.")
+    return redirect("command_center:risk-profile", pk=profile.pk)
+
+
+@workspace_permission("risk.access")
+def risk_profile_detail(request: HttpRequest, pk) -> HttpResponse:
+    profile = get_object_or_404(
+        RiskProfile.objects.select_related("organization", "opportunity", "contract"),
+        workspace=get_request_workspace(request),
+        pk=pk,
+    )
+    snapshot = profile.snapshots.first()
+    component_rows = []
+    if snapshot:
+        component_rows = [
+            {"key": key, "score": Decimal(component["score"]), "component": component}
+            for key, component in snapshot.components.items()
+        ]
+    return _render(
+        request,
+        "command_center/risk_detail.html",
+        {
+            "profile": profile,
+            "snapshot": snapshot,
+            "component_rows": component_rows,
+            "categories": RiskCategory.objects.filter(workspace=profile.workspace),
+            "observations": profile.observations.select_related("category", "evidence")[:100],
+            "recommendations": profile.recommendations.select_related("category", "snapshot"),
+            "overrides": profile.overrides.select_related("category", "created_by")[:30],
+        },
+    )
+
+
+@require_POST
+@workspace_permission("risk.access")
+def calculate_risk_view(request: HttpRequest, pk) -> HttpResponse:
+    profile = get_object_or_404(RiskProfile, workspace=get_request_workspace(request), pk=pk)
+    calculate_risk(profile, triggered_by="manual_ui")
+    messages.success(request, "Risk recalculated from the current evidence.")
+    return redirect("command_center:risk-profile", pk=pk)
+
+
+@require_POST
+@workspace_permission("risk.access")
+def sync_risk_finance(request: HttpRequest, pk) -> HttpResponse:
+    profile = get_object_or_404(RiskProfile, workspace=get_request_workspace(request), pk=pk)
+    currency = request.POST.get("currency", "USD").upper()
+    if len(currency) != 3 or not currency.isalpha():
+        messages.error(request, "Use a three-letter currency code.")
+    else:
+        count = sync_finance_observations(profile, currency=currency)
+        messages.success(request, f"Finance signals synchronized ({count} new).")
+    return redirect("command_center:risk-profile", pk=pk)
+
+
+@require_POST
+@workspace_permission("risk.access")
+def add_risk_observation(request: HttpRequest, pk) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    profile = get_object_or_404(RiskProfile, workspace=workspace, pk=pk)
+    category = get_object_or_404(RiskCategory, workspace=workspace, pk=request.POST.get("category"))
+    try:
+        severity = Decimal(request.POST.get("severity", "0"))
+        probability = Decimal(request.POST.get("probability", "0"))
+        impact = Decimal(request.POST.get("impact", "0"))
+        confidence = Decimal(request.POST.get("confidence", "1"))
+        RiskObservation.objects.create(
+            workspace=workspace,
+            profile=profile,
+            category=category,
+            source=ObservationSource.HUMAN,
+            fact_type=FactType.OBSERVED,
+            source_type="manual_risk_review",
+            source_id=f"user:{request.user.pk}:{timezone.now().isoformat()}",
+            explanation=request.POST.get("explanation", "").strip(),
+            severity=severity,
+            probability=probability,
+            impact=impact,
+            confidence=confidence,
+            observed_at=timezone.now(),
+            confirmed=True,
+            created_by=request.user,
+        )
+    except (InvalidOperation, ValueError, ValidationError):
+        messages.error(request, "The observation values are invalid.")
+    else:
+        messages.success(request, "Human observation added with traceable provenance.")
+    return redirect("command_center:risk-profile", pk=pk)
+
+
+@require_POST
+@workspace_permission("risk.access")
+def add_risk_override(request: HttpRequest, pk) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    profile = get_object_or_404(RiskProfile, workspace=workspace, pk=pk)
+    category = get_object_or_404(RiskCategory, workspace=workspace, pk=request.POST.get("category"))
+    try:
+        score = Decimal(request.POST.get("score", "0"))
+        if score < 0 or score > 100:
+            raise ValueError
+    except (InvalidOperation, ValueError):
+        messages.error(request, "Override score must be from 0 to 100.")
+    else:
+        Override.objects.create(
+            workspace=workspace,
+            profile=profile,
+            category=category,
+            score=score,
+            reason=request.POST.get("reason", "").strip(),
+            created_by=request.user,
+            effective_at=timezone.now(),
+        )
+        messages.success(request, "Override appended; historical snapshots remain unchanged.")
+    return redirect("command_center:risk-profile", pk=pk)
+
+
+@require_POST
+@workspace_permission("approvals.manage")
+def decide_risk_control(request: HttpRequest, pk) -> HttpResponse:
+    recommendation = get_object_or_404(
+        ControlRecommendation,
+        workspace=get_request_workspace(request),
+        pk=pk,
+    )
+    decision = request.POST.get("decision")
+    if decision not in [RecommendationStatus.ACCEPTED, RecommendationStatus.REJECTED]:
+        messages.error(request, "Choose accept or reject.")
+    else:
+        recommendation.status = decision
+        recommendation.save(update_fields=["status", "updated_at"])
+        messages.success(request, f"Control {decision}.")
+    return redirect("command_center:risk-profile", pk=recommendation.profile_id)
 
 
 @require_POST
@@ -1089,6 +1270,7 @@ def organization_detail(request: HttpRequest, pk) -> HttpResponse:
                 status="succeeded",
             ).select_related("source_record"),
             "manual_claim_form": ManualClaimForm(),
+            "risk_profiles": organization.risk_profiles.filter(active=True),
         },
     )
 

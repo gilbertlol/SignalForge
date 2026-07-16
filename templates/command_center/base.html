@@ -41,6 +41,7 @@
         {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}"><span aria-hidden="true">⚙</span> Sources & models</a>{% endif %}
         {% if nav.agents %}<a class="{% if request.resolver_match.url_name == 'crew' %}active{% endif %}" href="{% url 'command_center:crew' %}"><span aria-hidden="true">◌</span> Crew</a>{% endif %}
         {% if nav.financials %}<a class="{% if request.resolver_match.url_name == 'finance-dashboard' %}active{% endif %}" href="{% url 'command_center:finance-dashboard' %}"><span aria-hidden="true">◫</span> Finance</a>{% endif %}
+        {% if nav.risk %}<a class="{% if 'risk' in request.resolver_match.url_name %}active{% endif %}" href="{% url 'command_center:risk-portfolio' %}"><span aria-hidden="true">△</span> Risk watch</a>{% endif %}
         <a class="{% if request.resolver_match.url_name == 'notification-center' %}active{% endif %}" href="{% url 'command_center:notification-center' %}"><span aria-hidden="true">◉</span> Notifications</a>
         <div class="sidebar-hope"><span aria-hidden="true">✧</span><p><strong>Stay curious.</strong><br>The right client may be one signal away.</p></div>
       </nav>

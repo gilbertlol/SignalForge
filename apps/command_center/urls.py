@@ -9,6 +9,18 @@ urlpatterns = [
     path("crew/", views.crew, name="crew"),
     path("notifications/", views.notification_center, name="notification-center"),
     path("finance/", views.finance_dashboard, name="finance-dashboard"),
+    path("risk/", views.risk_portfolio, name="risk-portfolio"),
+    path(
+        "risk/organizations/<uuid:organization_pk>/create/",
+        views.create_risk_profile,
+        name="create-risk-profile",
+    ),
+    path("risk/<uuid:pk>/", views.risk_profile_detail, name="risk-profile"),
+    path("risk/<uuid:pk>/calculate/", views.calculate_risk_view, name="calculate-risk"),
+    path("risk/<uuid:pk>/sync-finance/", views.sync_risk_finance, name="sync-risk-finance"),
+    path("risk/<uuid:pk>/observations/", views.add_risk_observation, name="add-risk-observation"),
+    path("risk/<uuid:pk>/overrides/", views.add_risk_override, name="add-risk-override"),
+    path("risk/controls/<uuid:pk>/decide/", views.decide_risk_control, name="decide-risk-control"),
     path(
         "notifications/<uuid:pk>/acknowledge/",
         views.acknowledge_notification,

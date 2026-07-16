@@ -51,6 +51,19 @@ from apps.notifications.views import (
 )
 from apps.opportunities.views import OpportunityViewSet
 from apps.organizations.views import OrganizationViewSet
+from apps.risk.views import (
+    AcceptancePolicyViewSet,
+    ControlRecommendationViewSet,
+    MitigationViewSet,
+    OverrideViewSet,
+    ReviewViewSet,
+    RiskCategoryViewSet,
+    RiskFactorViewSet,
+    RiskObservationViewSet,
+    RiskPortfolioViewSet,
+    RiskProfileViewSet,
+    RiskSnapshotViewSet,
+)
 from apps.scoring.views import ScoreSnapshotViewSet
 from apps.tasks.views import (
     AgentExecutionViewSet,
@@ -104,6 +117,17 @@ router.register(
 router.register("finance/forecasts", RevenueForecastViewSet, basename="finance-forecast")
 router.register("finance/transactions", FinancialTransactionViewSet, basename="finance-transaction")
 router.register("finance/summary", FinanceSummaryViewSet, basename="finance-summary")
+router.register("risk/profiles", RiskProfileViewSet, basename="risk-profile")
+router.register("risk/categories", RiskCategoryViewSet, basename="risk-category")
+router.register("risk/factors", RiskFactorViewSet, basename="risk-factor")
+router.register("risk/observations", RiskObservationViewSet, basename="risk-observation")
+router.register("risk/snapshots", RiskSnapshotViewSet, basename="risk-snapshot")
+router.register("risk/controls", ControlRecommendationViewSet, basename="risk-control")
+router.register("risk/mitigations", MitigationViewSet, basename="risk-mitigation")
+router.register("risk/overrides", OverrideViewSet, basename="risk-override")
+router.register("risk/reviews", ReviewViewSet, basename="risk-review")
+router.register("risk/policies", AcceptancePolicyViewSet, basename="risk-policy")
+router.register("risk/portfolio", RiskPortfolioViewSet, basename="risk-portfolio")
 router.register("dashboards", DashboardViewSet, basename="dashboard")
 router.register("dashboard-widgets", DashboardWidgetViewSet, basename="dashboard-widget")
 router.register("saved-filters", SavedFilterViewSet, basename="saved-filter")

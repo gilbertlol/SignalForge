@@ -36,6 +36,8 @@ from apps.notifications.models import AlertEvent, AlertRule, Notification, Notif
 from apps.opportunities.tests.factories import OpportunityFactory
 from apps.organizations.models import Organization
 from apps.organizations.tests.factories import OrganizationFactory
+from apps.risk.models import RiskObservation, RiskProfile
+from apps.risk.services import ensure_categories
 from apps.tasks.models import Operator, OperatorType
 
 pytestmark = pytest.mark.django_db
@@ -185,6 +187,63 @@ def test_finance_dashboard_requires_financial_permission(client):
     response = client.get(reverse("command_center:finance-dashboard") + "?currency=CAD")
     assert response.status_code == 200
     assert b"Know what the hunt is worth" in response.content
+
+
+def test_risk_portfolio_requires_permission_and_is_workspace_scoped(client):
+    user = UserFactory()
+    workspace = user.memberships.get().workspace
+    visible = OrganizationFactory(workspace=workspace, name="Visible risk client")
+    hidden = OrganizationFactory(name="Hidden risk client")
+    RiskProfile.objects.create(workspace=workspace, organization=visible)
+    RiskProfile.objects.create(workspace=hidden.workspace, organization=hidden)
+    client.force_login(user)
+    assert client.get(reverse("command_center:risk-portfolio")).status_code == 403
+    permission, _ = AccessPermission.objects.get_or_create(
+        key="risk.access", defaults={"name": "Risk access"}
+    )
+    user.memberships.get().permission_grants.add(permission)
+
+    response = client.get(reverse("command_center:risk-portfolio"))
+
+    assert response.status_code == 200
+    assert b"Visible risk client" in response.content
+    assert b"Hidden risk client" not in response.content
+
+
+def test_risk_detail_adds_traceable_observation_and_recalculates(client):
+    user = UserFactory()
+    workspace = user.memberships.get().workspace
+    permission, _ = AccessPermission.objects.get_or_create(
+        key="risk.access", defaults={"name": "Risk access"}
+    )
+    user.memberships.get().permission_grants.add(permission)
+    organization = OrganizationFactory(workspace=workspace)
+    profile = RiskProfile.objects.create(workspace=workspace, organization=organization)
+    category = ensure_categories(workspace)["relationship"]
+    client.force_login(user)
+
+    response = client.post(
+        reverse("command_center:add-risk-observation", kwargs={"pk": profile.pk}),
+        {
+            "category": category.pk,
+            "explanation": "Stakeholder repeatedly changed scope",
+            "severity": 80,
+            "probability": 70,
+            "impact": 60,
+            "confidence": "0.9",
+        },
+    )
+    assert response.status_code == 302
+    observation = RiskObservation.objects.get(profile=profile)
+    assert observation.source_type == "manual_risk_review"
+    assert observation.created_by == user
+
+    response = client.post(reverse("command_center:calculate-risk", kwargs={"pk": profile.pk}))
+    assert response.status_code == 302
+    detail = client.get(reverse("command_center:risk-profile", kwargs={"pk": profile.pk}))
+    assert detail.status_code == 200
+    assert b"Stakeholder repeatedly changed scope" in detail.content
+    assert b"Relationship" in detail.content
 
 
 def test_create_hunt_profile_builds_version_and_activates(client):
