@@ -174,6 +174,19 @@ def test_notification_center_only_lists_current_users_notifications(client):
     assert b"Hidden alert" not in response.content
 
 
+def test_finance_dashboard_requires_financial_permission(client):
+    user = UserFactory()
+    client.force_login(user)
+    assert client.get(reverse("command_center:finance-dashboard")).status_code == 403
+    permission, _ = AccessPermission.objects.get_or_create(
+        key="financials.access", defaults={"name": "Financial access"}
+    )
+    user.memberships.get().permission_grants.add(permission)
+    response = client.get(reverse("command_center:finance-dashboard") + "?currency=CAD")
+    assert response.status_code == 200
+    assert b"Know what the hunt is worth" in response.content
+
+
 def test_create_hunt_profile_builds_version_and_activates(client):
     user = UserFactory()
     client.force_login(user)

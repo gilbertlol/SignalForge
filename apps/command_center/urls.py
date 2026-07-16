@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("crew/", views.crew, name="crew"),
     path("notifications/", views.notification_center, name="notification-center"),
+    path("finance/", views.finance_dashboard, name="finance-dashboard"),
     path(
         "notifications/<uuid:pk>/acknowledge/",
         views.acknowledge_notification,

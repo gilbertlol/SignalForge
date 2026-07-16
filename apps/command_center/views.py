@@ -34,6 +34,8 @@ from apps.discovery.services import start_run
 from apps.discovery.tasks import run_discovery_task
 from apps.evidence.models import OrganizationClaim
 from apps.evidence.services import create_manual_claim, select_organization_claim
+from apps.finance.models import FinancialTransaction, Invoice, InvoiceStatus
+from apps.finance.services import client_summary, monthly_recurring_revenue, weighted_forecast
 from apps.hunting.models import HuntPreset, HuntProfile, HuntProfileStatus
 from apps.hunting.services import activate_version, archive, create_version, pause
 from apps.integrations.models import (
@@ -107,6 +109,7 @@ def _navigation(request: HttpRequest) -> dict[str, bool]:
         "providers": allowed("providers.manage"),
         "users": allowed("users.manage"),
         "agents": allowed("agents.manage"),
+        "financials": allowed("financials.access"),
     }
 
 
@@ -162,6 +165,32 @@ def notification_center(request: HttpRequest) -> HttpResponse:
             "critical_count": notification_queryset.filter(
                 priority="critical", acknowledged_at__isnull=True
             ).count(),
+        },
+    )
+
+
+@workspace_permission("financials.access")
+def finance_dashboard(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    currency = request.GET.get("currency", "USD").upper()
+    summaries = [
+        {"organization": organization, "summary": client_summary(organization, currency=currency)}
+        for organization in Organization.objects.filter(workspace=workspace)
+    ]
+    return _render(
+        request,
+        "command_center/finance.html",
+        {
+            "currency": currency,
+            "summaries": summaries,
+            "mrr": monthly_recurring_revenue(workspace, currency=currency),
+            "forecast": weighted_forecast(workspace, currency=currency),
+            "overdue_count": Invoice.objects.filter(
+                workspace=workspace, currency=currency, status=InvoiceStatus.OVERDUE
+            ).count(),
+            "transactions": FinancialTransaction.objects.filter(
+                workspace=workspace, currency=currency
+            ).select_related("organization")[:20],
         },
     )
 

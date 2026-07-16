@@ -12,6 +12,22 @@ from apps.accounts.views import APIKeyViewSet, MembershipViewSet, SessionViewSet
 from apps.communications.views import ChannelAccountViewSet, ConversationViewSet, MessageViewSet
 from apps.contacts.views import ContactViewSet
 from apps.discovery.views import DiscoveryRunViewSet
+from apps.finance.views import (
+    ClientBudgetViewSet,
+    CommissionRuleViewSet,
+    CommissionViewSet,
+    ContractViewSet,
+    CostAllocationViewSet,
+    ExpenseViewSet,
+    FinanceSummaryViewSet,
+    FinancialTransactionViewSet,
+    InvoiceViewSet,
+    PaymentViewSet,
+    ProposalViewSet,
+    QuoteViewSet,
+    RevenueForecastViewSet,
+    SubscriptionViewSet,
+)
 from apps.hunting.views import HuntProfileViewSet
 from apps.integrations.views import (
     AIEndpointViewSet,
@@ -70,6 +86,24 @@ router.register("opportunities", OpportunityViewSet, basename="opportunity")
 router.register("scores", ScoreSnapshotViewSet, basename="scoresnapshot")
 router.register("hunt-profiles", HuntProfileViewSet, basename="huntprofile")
 router.register("discovery-runs", DiscoveryRunViewSet, basename="discoveryrun")
+router.register("finance/quotes", QuoteViewSet, basename="finance-quote")
+router.register("finance/proposals", ProposalViewSet, basename="finance-proposal")
+router.register("finance/contracts", ContractViewSet, basename="finance-contract")
+router.register("finance/invoices", InvoiceViewSet, basename="finance-invoice")
+router.register("finance/payments", PaymentViewSet, basename="finance-payment")
+router.register("finance/expenses", ExpenseViewSet, basename="finance-expense")
+router.register(
+    "finance/commission-rules", CommissionRuleViewSet, basename="finance-commission-rule"
+)
+router.register("finance/commissions", CommissionViewSet, basename="finance-commission")
+router.register("finance/subscriptions", SubscriptionViewSet, basename="finance-subscription")
+router.register("finance/budgets", ClientBudgetViewSet, basename="finance-budget")
+router.register(
+    "finance/cost-allocations", CostAllocationViewSet, basename="finance-cost-allocation"
+)
+router.register("finance/forecasts", RevenueForecastViewSet, basename="finance-forecast")
+router.register("finance/transactions", FinancialTransactionViewSet, basename="finance-transaction")
+router.register("finance/summary", FinanceSummaryViewSet, basename="finance-summary")
 router.register("dashboards", DashboardViewSet, basename="dashboard")
 router.register("dashboard-widgets", DashboardWidgetViewSet, basename="dashboard-widget")
 router.register("saved-filters", SavedFilterViewSet, basename="saved-filter")

@@ -48,6 +48,7 @@ LOCAL_APPS = [
     "apps.command_center",
     "apps.tasks",
     "apps.notifications",
+    "apps.finance",
     "apps.audit",
     "apps.integrations",
 ]
