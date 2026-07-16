@@ -10,6 +10,7 @@ from django.utils import timezone
 from jsonschema import ValidationError, validate
 
 from .models import (
+    GroundedSearchTrace,
     InvocationStatus,
     LeadSourceConfiguration,
     LeadSourceHealthCheck,
@@ -136,8 +137,22 @@ def route_models(route: ModelRoute) -> list[ModelDefinition]:
         and entry.model.endpoint.enabled
         and entry.model.endpoint.provider.enabled
         and entry.model.endpoint.privacy_class in allowed
+        and grounded_model_is_ready(entry.model)
         and not _circuit_is_open(entry.model)
     ]
+
+
+def grounded_model_is_ready(model: ModelDefinition) -> bool:
+    provider = model.endpoint.provider
+    if provider.provider_key not in {"openai", "gemini", "mistral", "anthropic"}:
+        return True
+    latest = provider.health_checks.order_by("-created_at").first()
+    return bool(
+        latest
+        and latest.was_successful
+        and latest.created_at >= timezone.now() - timedelta(hours=24)
+        and "grounded_web_search" in latest.capabilities
+    )
 
 
 def _circuit_is_open(model: ModelDefinition) -> bool:
@@ -209,7 +224,8 @@ def invoke(
             task_type=route.task_type,
             retry_count=retry_count,
         )
-        adapter = get_ai_model_adapter(model.endpoint.provider.provider_type)
+        provider = model.endpoint.provider
+        adapter = get_ai_model_adapter(provider.provider_type, provider.provider_key)
         started = time.monotonic()
         try:
             if adapter is None or not adapter.is_configured():
@@ -222,6 +238,7 @@ def invoke(
                 "model": model.model_name,
                 "base_url": model.endpoint.base_url,
                 "timeout": model.endpoint.timeout_seconds,
+                "max_retries": provider.config.get("max_retries", 1),
                 **supplied_options,
             }
             if model.endpoint.credential_id:
@@ -231,7 +248,12 @@ def invoke(
             completion_prompt = prompt
             parsed = None
             for repair_attempt in range(schema_repair_attempts + 1):
-                text = adapter.complete(completion_prompt, **adapter_options)
+                grounded = None
+                if "grounded_web_search" in getattr(adapter, "capabilities", ()):
+                    grounded = adapter.grounded_complete(completion_prompt, **adapter_options)
+                    text = grounded.text
+                else:
+                    text = adapter.complete(completion_prompt, **adapter_options)
                 if not output_schema:
                     break
                 try:
@@ -249,13 +271,39 @@ def invoke(
             invocation.status = InvocationStatus.SUCCEEDED
             invocation.output_schema_valid = True if output_schema else None
             invocation.latency_ms = int((time.monotonic() - started) * 1000)
-            invocation.input_tokens = max(1, len(prompt) // 4)
-            invocation.output_tokens = max(1, len(text) // 4)
+            invocation.input_tokens = (
+                grounded.input_tokens
+                if grounded and grounded.input_tokens
+                else max(1, len(prompt) // 4)
+            )
+            invocation.output_tokens = (
+                grounded.output_tokens
+                if grounded and grounded.output_tokens
+                else max(1, len(text) // 4)
+            )
             invocation.estimated_cost_cents = (
                 Decimal(invocation.input_tokens) * model.input_cost_per_million
                 + Decimal(invocation.output_tokens) * model.output_cost_per_million
             ) / Decimal(10_000)
+            grounded_search_cost = Decimal(
+                str(provider.config.get("grounded_search_cost_cents", 0))
+            )
+            if grounded is not None:
+                invocation.estimated_cost_cents += grounded_search_cost
             invocation.save()
+            if grounded is not None:
+                GroundedSearchTrace.objects.create(
+                    workspace=route.workspace,
+                    invocation=invocation,
+                    provider_key=provider.provider_key,
+                    model_identifier=model.model_name,
+                    query=prompt,
+                    response_text=text,
+                    citations=grounded.citations,
+                    search_queries=grounded.search_queries,
+                    raw_metadata=grounded.raw_metadata,
+                    search_cost_cents=grounded_search_cost,
+                )
             return GatewayResult(text=text, parsed=parsed, invocation=invocation)
         except (GatewayError, RuntimeError, ValueError, ValidationError, OSError, KeyError) as exc:
             reason = exc.__class__.__name__
@@ -265,13 +313,25 @@ def invoke(
             invocation.output_schema_valid = False if output_schema else None
             invocation.latency_ms = int((time.monotonic() - started) * 1000)
             invocation.save()
+            if "grounded_web_search" in getattr(adapter, "capabilities", ()) and isinstance(
+                exc, GatewayError | RuntimeError | OSError | KeyError
+            ):
+                ProviderHealthCheck.objects.create(
+                    workspace=route.workspace,
+                    provider=provider,
+                    endpoint=model.endpoint,
+                    was_successful=False,
+                    latency_ms=invocation.latency_ms,
+                    capabilities=[],
+                    sanitized_error=reason,
+                )
     raise GatewayError(f"No model completed the invocation ({', '.join(failures)})")
 
 
 def check_provider(provider) -> ProviderHealthCheck:
     endpoint = provider.endpoints.filter(enabled=True).first()
     started = time.monotonic()
-    adapter = get_ai_model_adapter(provider.provider_type)
+    adapter = get_ai_model_adapter(provider.provider_type, provider.provider_key)
     try:
         if not endpoint or adapter is None or not adapter.is_configured():
             raise GatewayError("Provider is not configured")
@@ -287,13 +347,22 @@ def check_provider(provider) -> ProviderHealthCheck:
             credential = endpoint.credential
             if credential is not None:
                 options["api_key"] = credential.get_secret()
-        adapter.complete("health-check", **options)
+        capabilities = list(getattr(adapter, "capabilities", ()))
+        if "grounded_web_search" in capabilities:
+            result = adapter.grounded_complete(
+                "Return one current public fact with its source URL.", **options
+            )
+            if not result.citations:
+                raise GatewayError("Grounded search returned no citations")
+        else:
+            adapter.complete("health-check", **options)
         return ProviderHealthCheck.objects.create(
             workspace=provider.workspace,
             provider=provider,
             endpoint=endpoint,
             was_successful=True,
             latency_ms=int((time.monotonic() - started) * 1000),
+            capabilities=capabilities,
         )
     except (GatewayError, RuntimeError, ValueError, OSError, KeyError) as exc:
         return ProviderHealthCheck.objects.create(

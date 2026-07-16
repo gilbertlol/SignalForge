@@ -256,3 +256,17 @@ class ProviderHealthCheck(WorkspaceScopedModel):
     latency_ms = models.PositiveIntegerField(default=0)
     capabilities = models.JSONField(default=list)
     sanitized_error = models.CharField(max_length=255, blank=True)
+
+
+class GroundedSearchTrace(WorkspaceScopedModel):
+    invocation = models.OneToOneField(
+        ModelInvocation, on_delete=models.CASCADE, related_name="grounded_search_trace"
+    )
+    provider_key = models.SlugField(max_length=100)
+    model_identifier = models.CharField(max_length=255)
+    query = models.TextField()
+    response_text = models.TextField()
+    citations = models.JSONField(default=list)
+    search_queries = models.JSONField(default=list)
+    raw_metadata = models.JSONField(default=dict)
+    search_cost_cents = models.DecimalField(max_digits=12, decimal_places=4, default=0)

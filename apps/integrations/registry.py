@@ -11,6 +11,12 @@ from .adapters import (
 from .providers.ai import OpenAICompatibleAdapter
 from .providers.apollo import ApolloLeadSourceAdapter
 from .providers.google_places import GooglePlacesLeadSourceAdapter
+from .providers.grounded import (
+    AnthropicWebSearchAdapter,
+    GeminiGoogleSearchAdapter,
+    MistralWebSearchAdapter,
+    OpenAIResponsesWebSearchAdapter,
+)
 from .providers.openstreetmap import OpenStreetMapLeadSourceAdapter
 from .providers.searxng import SearXNGLeadSourceAdapter
 from .providers.website import PublicWebsiteAnalysisAdapter
@@ -24,6 +30,13 @@ _TECHNOLOGY_DETECTION_ADAPTERS: dict[str, type[TechnologyDetectionAdapter]] = {}
 _AI_MODEL_ADAPTERS: dict[str, type[AIModelAdapter]] = {
     "local_openai": OpenAICompatibleAdapter,
     "cloud_openai": OpenAICompatibleAdapter,
+}
+
+_NATIVE_GROUNDED_ADAPTERS: dict[str, type[AIModelAdapter]] = {
+    "openai": OpenAIResponsesWebSearchAdapter,
+    "gemini": GeminiGoogleSearchAdapter,
+    "mistral": MistralWebSearchAdapter,
+    "anthropic": AnthropicWebSearchAdapter,
 }
 
 _MESSAGING_ADAPTERS: dict[str, type[MessagingAdapter]] = {}
@@ -73,8 +86,10 @@ def get_website_analysis_adapter(provider_key: str):
     return PublicWebsiteAnalysisAdapter() if provider_key == "public_website" else None
 
 
-def get_ai_model_adapter(provider_type: str) -> AIModelAdapter | None:
-    adapter_class = _AI_MODEL_ADAPTERS.get(provider_type)
+def get_ai_model_adapter(provider_type: str, provider_key: str = "") -> AIModelAdapter | None:
+    adapter_class = _NATIVE_GROUNDED_ADAPTERS.get(provider_key) or _AI_MODEL_ADAPTERS.get(
+        provider_type
+    )
     return adapter_class() if adapter_class else None
 
 

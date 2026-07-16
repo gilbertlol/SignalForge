@@ -7,7 +7,19 @@ in this ticket — that starts with the first real integration issue.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass(frozen=True)
+class GroundedCompletion:
+    text: str
+    citations: list[dict[str, Any]] = field(default_factory=list)
+    search_queries: list[str] = field(default_factory=list)
+    raw_metadata: dict[str, Any] = field(default_factory=dict)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    search_cost_cents: float = 0
 
 
 class ProviderAdapter(ABC):
@@ -76,3 +88,7 @@ class AIModelAdapter(ProviderAdapter):
     @abstractmethod
     def complete(self, prompt: str, **options: Any) -> str:
         raise NotImplementedError
+
+    def grounded_complete(self, prompt: str, **options: Any) -> GroundedCompletion:
+        """Run vendor-native web search. Unsupported adapters fail closed."""
+        raise NotImplementedError("grounded web search is not supported")

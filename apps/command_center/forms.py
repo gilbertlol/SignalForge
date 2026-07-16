@@ -12,6 +12,7 @@ from apps.integrations.models import (
     PrivacyClass,
     ProviderType,
 )
+from apps.integrations.services import grounded_model_is_ready
 from apps.opportunities.models import OpportunityStatus
 
 
@@ -343,6 +344,8 @@ class ResearchRouteForm(forms.Form):
         if workspace is not None:
             model_field = self.fields["model"]
             assert isinstance(model_field, forms.ModelChoiceField)
-            model_field.queryset = ModelDefinition.objects.filter(
+            candidates = ModelDefinition.objects.filter(
                 workspace=workspace, enabled=True, endpoint__enabled=True
             ).select_related("endpoint__provider")
+            ready_ids = [model.pk for model in candidates if grounded_model_is_ready(model)]
+            model_field.queryset = candidates.filter(pk__in=ready_ids)

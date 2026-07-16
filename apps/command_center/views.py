@@ -405,7 +405,20 @@ def opportunity_status(request: HttpRequest, pk) -> HttpResponse:
 @workspace_permission("providers.manage")
 def provider_settings(request: HttpRequest) -> HttpResponse:
     workspace = get_request_workspace(request)
-    providers = AIProvider.objects.filter(workspace=workspace).prefetch_related("endpoints__models")
+    providers = list(
+        AIProvider.objects.filter(workspace=workspace).prefetch_related(
+            "endpoints__models", "health_checks"
+        )
+    )
+    for provider in providers:
+        provider.latest_health_ui = max(  # type: ignore[attr-defined]
+            provider.health_checks.all(), key=lambda item: item.created_at, default=None
+        )
+        provider.is_live_validated_ui = bool(  # type: ignore[attr-defined]
+            provider.latest_health_ui
+            and provider.latest_health_ui.was_successful
+            and provider.latest_health_ui.created_at >= timezone.now() - timedelta(hours=24)
+        )
     lead_sources = list(LeadSourceConfiguration.objects.filter(workspace=workspace))
     apollo = next((source for source in lead_sources if source.source_key == "apollo"), None)
     google = next((source for source in lead_sources if source.source_key == "google_places"), None)
