@@ -1,5 +1,8 @@
 # SignalForge
 
+Production deployment instructions for `signalforge.dev2share.com` are in
+[DEPLOYMENT.md](DEPLOYMENT.md).
+
 SignalForge is a local-first, AI-powered revenue operating system. It is being built to hunt
 for business opportunities via configurable Hunt Profiles, search pluggable sources, collect
 evidence, deduplicate organizations and contacts, score prospects, centralize communications

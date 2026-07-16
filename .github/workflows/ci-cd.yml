@@ -1,0 +1,93 @@
+name: SignalForge CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: signalforge-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare test environment
+        run: cp .env.example .env
+      - name: Build test stack
+        run: docker compose build
+      - name: Start dependencies
+        run: docker compose up -d db redis
+      - name: Lint
+        run: docker compose run --rm web ruff check .
+      - name: Check formatting
+        run: docker compose run --rm web ruff format --check .
+      - name: Django checks
+        run: docker compose run --rm web python manage.py check
+      - name: Check migration drift
+        run: docker compose run --rm web python manage.py makemigrations --check --dry-run
+      - name: Test
+        run: docker compose run --rm -e DJANGO_SETTINGS_MODULE=config.settings.test web pytest -q
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+  deploy:
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/master' &&
+      vars.DEPLOY_ENABLED == 'true'
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure deployment SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Package release
+        run: tar --exclude=.git --exclude=.env -czf /tmp/signalforge-${GITHUB_SHA}.tar.gz .
+      - name: Upload release
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: scp /tmp/signalforge-${GITHUB_SHA}.tar.gz "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/"
+      - name: Deploy and health-check
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/signalforge' }}
+        run: |
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s -- \
+            "$DEPLOY_PATH" "$GITHUB_SHA" "/tmp/signalforge-${GITHUB_SHA}.tar.gz" <<'REMOTE'
+          set -Eeuo pipefail
+          deploy_path="$1"
+          release_sha="$2"
+          archive="$3"
+          release_dir="${deploy_path}/releases/${release_sha}"
+          mkdir -p "$release_dir" "${deploy_path}/shared"
+          tar -xzf "$archive" -C "$release_dir"
+          rm -f "$archive"
+          chmod +x "${release_dir}/deploy/deploy.sh"
+          "${release_dir}/deploy/deploy.sh" "$release_dir" "$release_sha"
+          REMOTE
+      - name: Verify public HTTPS endpoint
+        run: |
+          curl --fail --show-error --silent \
+            --retry 12 --retry-delay 5 --retry-all-errors \
+            https://signalforge.dev2share.com/health/ready
