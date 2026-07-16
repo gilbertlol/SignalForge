@@ -39,7 +39,7 @@
         <p class="nav-label nav-label-system">System</p>
         {% if nav.communications %}<a href="{% url 'command_center:inbox' %}"><span aria-hidden="true">⌁</span> Messages</a>{% endif %}
         {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}"><span aria-hidden="true">⚙</span> Sources & models</a>{% endif %}
-        {% if nav.users %}<a href="/api/v1/memberships/"><span aria-hidden="true">◌</span> Crew</a>{% endif %}
+        {% if nav.agents %}<a class="{% if request.resolver_match.url_name == 'crew' %}active{% endif %}" href="{% url 'command_center:crew' %}"><span aria-hidden="true">◌</span> Crew</a>{% endif %}
         <div class="sidebar-hope"><span aria-hidden="true">✧</span><p><strong>Stay curious.</strong><br>The right client may be one signal away.</p></div>
       </nav>
       <main id="main" class="content" tabindex="-1">

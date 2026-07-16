@@ -55,6 +55,7 @@ from apps.integrations.services import (
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
 from apps.organizations.services import create_organization
+from apps.tasks.models import AgentExecution, ApprovalRequest, ApprovalStatus, Operator, WorkItem
 
 from .forms import (
     AIEndpointForm,
@@ -103,7 +104,40 @@ def _navigation(request: HttpRequest) -> dict[str, bool]:
         "communications": allowed("communications.access"),
         "providers": allowed("providers.manage"),
         "users": allowed("users.manage"),
+        "agents": allowed("agents.manage"),
     }
+
+
+@workspace_permission("agents.manage")
+def crew(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    operators = Operator.objects.filter(workspace=workspace).order_by("name")
+    active_statuses = ["assigned", "in_progress", "blocked"]
+    operator_rows = [
+        {
+            "operator": operator,
+            "workload": operator.assigned_work.filter(status__in=active_statuses).count(),
+        }
+        for operator in operators
+    ]
+    return _render(
+        request,
+        "command_center/crew.html",
+        {
+            "operator_rows": operator_rows,
+            "work_items": WorkItem.objects.filter(workspace=workspace)
+            .select_related("assignee")
+            .order_by("status", "priority", "created_at")[:30],
+            "approvals": ApprovalRequest.objects.filter(
+                workspace=workspace, status=ApprovalStatus.PENDING
+            )
+            .select_related("execution__operator")
+            .order_by("created_at")[:20],
+            "executions": AgentExecution.objects.filter(workspace=workspace)
+            .select_related("operator")
+            .order_by("-created_at")[:12],
+        },
+    )
 
 
 def _render(request: HttpRequest, template: str, context: dict) -> HttpResponse:

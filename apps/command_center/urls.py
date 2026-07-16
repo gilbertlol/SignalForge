@@ -6,6 +6,7 @@ app_name = "command_center"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path("crew/", views.crew, name="crew"),
     path("review/", views.review_queue, name="review-queue"),
     path("hunt-profiles/", views.hunt_profiles, name="hunt-profiles"),
     path("hunt-profiles/new/", views.create_hunt_profile, name="create-hunt-profile"),

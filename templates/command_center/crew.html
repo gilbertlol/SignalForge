@@ -1,0 +1,42 @@
+{% extends "command_center/base.html" %}
+{% load static %}
+{% block title %}Crew{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'command_center/crew.css' %}">{% endblock %}
+{% block content %}
+<section class="crew-hero">
+  <div><p class="eyebrow">Human + AI operations</p><h1>Your expedition crew</h1><p>Assign work, review agent decisions, and follow every execution from one control surface.</p></div>
+  <a class="crew-api-link" href="/api/v1/operators/">Manage crew via API <span>↗</span></a>
+</section>
+
+<section class="crew-stats" aria-label="Crew summary">
+  <article><strong>{{ operator_rows|length }}</strong><span>operators</span></article>
+  <article><strong>{{ work_items|length }}</strong><span>queued work items</span></article>
+  <article><strong>{{ approvals|length }}</strong><span>awaiting approval</span></article>
+</section>
+
+<div class="crew-grid">
+  <section class="crew-panel crew-roster"><header><div><p class="eyebrow">Roster</p><h2>Operators</h2></div></header>
+    {% for row in operator_rows %}<article class="operator-row">
+      <span class="operator-orb {{ row.operator.operator_type }}">{% if row.operator.operator_type == 'ai_agent' %}✦{% else %}●{% endif %}</span>
+      <div><strong>{{ row.operator.name }}</strong><small>{{ row.operator.get_operator_type_display }} · {{ row.operator.get_availability_display }}</small></div>
+      <div class="capacity"><span>{{ row.workload }}/{{ row.operator.capacity }}</span><small>load</small></div>
+    </article>{% empty %}<p class="empty-state">No operators yet. Create a human or AI operator through the API to assemble your crew.</p>{% endfor %}
+  </section>
+
+  <section class="crew-panel"><header><div><p class="eyebrow">Decision gate</p><h2>Approvals</h2></div><span class="count-pill">{{ approvals|length }}</span></header>
+    {% for approval in approvals %}<article class="approval-row"><div><strong>{{ approval.execution.action_key }}</strong><small>{{ approval.execution.operator.name }} · {{ approval.reason }}</small></div><a href="/api/v1/agent-approvals/{{ approval.id }}/">Review</a></article>
+    {% empty %}<p class="empty-state">The approval queue is clear.</p>{% endfor %}
+  </section>
+
+  <section class="crew-panel crew-work"><header><div><p class="eyebrow">Shared queue</p><h2>Work in motion</h2></div></header>
+    <div class="work-table"><div class="work-heading"><span>Task</span><span>Operator</span><span>Status</span></div>
+    {% for item in work_items %}<article><div><strong>{{ item.title }}</strong><small>P{{ item.priority }}{% if item.context_type %} · {{ item.context_type }}{% endif %}</small></div><span>{{ item.assignee.name|default:"Unassigned" }}</span><span class="status-chip {{ item.status }}">{{ item.get_status_display }}</span></article>
+    {% empty %}<p class="empty-state">No work has entered the queue yet.</p>{% endfor %}</div>
+  </section>
+
+  <section class="crew-panel"><header><div><p class="eyebrow">Audit trail</p><h2>Recent executions</h2></div></header>
+    {% for execution in executions %}<article class="execution-row"><span class="execution-dot {{ execution.status }}"></span><div><strong>{{ execution.action_key }}</strong><small>{{ execution.operator.name }} · {{ execution.get_status_display }}</small></div><span>{{ execution.cost_cents|floatformat:2 }}¢</span></article>
+    {% empty %}<p class="empty-state">Agent executions will appear here with their cost and outcome.</p>{% endfor %}
+  </section>
+</div>
+{% endblock %}

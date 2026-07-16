@@ -35,6 +35,7 @@ from apps.integrations.models import (
 from apps.opportunities.tests.factories import OpportunityFactory
 from apps.organizations.models import Organization
 from apps.organizations.tests.factories import OrganizationFactory
+from apps.tasks.models import Operator, OperatorType
 
 pytestmark = pytest.mark.django_db
 
@@ -112,6 +113,26 @@ def test_permission_aware_navigation_hides_inbox(client):
     response = client.get(reverse("command_center:dashboard"))
 
     assert b"Unified inbox" not in response.content
+
+
+def test_crew_page_requires_permission_and_lists_operators(client):
+    user = UserFactory()
+    workspace = user.memberships.get().workspace
+    Operator.objects.create(
+        workspace=workspace, name="Scout agent", operator_type=OperatorType.AI_AGENT
+    )
+    client.force_login(user)
+
+    assert client.get(reverse("command_center:crew")).status_code == 403
+    permission, _ = AccessPermission.objects.get_or_create(
+        key="agents.manage", defaults={"name": "Manage agents"}
+    )
+    user.memberships.get().permission_grants.add(permission)
+
+    response = client.get(reverse("command_center:crew"))
+    assert response.status_code == 200
+    assert b"Scout agent" in response.content
+    assert b"Your expedition crew" in response.content
 
 
 def test_create_hunt_profile_builds_version_and_activates(client):

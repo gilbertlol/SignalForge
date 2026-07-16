@@ -24,6 +24,20 @@ from apps.integrations.views import (
 from apps.opportunities.views import OpportunityViewSet
 from apps.organizations.views import OrganizationViewSet
 from apps.scoring.views import ScoreSnapshotViewSet
+from apps.tasks.views import (
+    AgentExecutionViewSet,
+    AgentProfileViewSet,
+    AgentVersionViewSet,
+    ApprovalRequestViewSet,
+    AssignmentPoolViewSet,
+    BudgetPolicyViewSet,
+    DataScopeViewSet,
+    OperatorViewSet,
+    PerformanceMetricViewSet,
+    TeamViewSet,
+    ToolPermissionViewSet,
+    WorkItemViewSet,
+)
 
 router = DefaultRouter()
 router.register("memberships", MembershipViewSet, basename="membership")
@@ -44,5 +58,17 @@ router.register("opportunities", OpportunityViewSet, basename="opportunity")
 router.register("scores", ScoreSnapshotViewSet, basename="scoresnapshot")
 router.register("hunt-profiles", HuntProfileViewSet, basename="huntprofile")
 router.register("discovery-runs", DiscoveryRunViewSet, basename="discoveryrun")
+router.register("operators", OperatorViewSet, basename="operator")
+router.register("operator-teams", TeamViewSet, basename="operator-team")
+router.register("assignment-pools", AssignmentPoolViewSet, basename="assignment-pool")
+router.register("work-items", WorkItemViewSet, basename="work-item")
+router.register("agent-profiles", AgentProfileViewSet, basename="agent-profile")
+router.register("agent-versions", AgentVersionViewSet, basename="agent-version")
+router.register("agent-tool-permissions", ToolPermissionViewSet, basename="agent-tool-permission")
+router.register("agent-data-scopes", DataScopeViewSet, basename="agent-data-scope")
+router.register("agent-budgets", BudgetPolicyViewSet, basename="agent-budget")
+router.register("agent-executions", AgentExecutionViewSet, basename="agent-execution")
+router.register("agent-approvals", ApprovalRequestViewSet, basename="agent-approval")
+router.register("operator-metrics", PerformanceMetricViewSet, basename="operator-metric")
 
 urlpatterns = router.urls
