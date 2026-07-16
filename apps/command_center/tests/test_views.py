@@ -32,6 +32,7 @@ from apps.integrations.models import (
     ProviderHealthCheck,
     ProviderType,
 )
+from apps.notifications.models import AlertEvent, AlertRule, Notification, NotificationPriority
 from apps.opportunities.tests.factories import OpportunityFactory
 from apps.organizations.models import Organization
 from apps.organizations.tests.factories import OrganizationFactory
@@ -133,6 +134,44 @@ def test_crew_page_requires_permission_and_lists_operators(client):
     assert response.status_code == 200
     assert b"Scout agent" in response.content
     assert b"Your expedition crew" in response.content
+
+
+def test_notification_center_only_lists_current_users_notifications(client):
+    user = UserFactory()
+    workspace = user.memberships.get().workspace
+    other = UserFactory(workspace_membership=workspace)
+    rule = AlertRule.objects.create(
+        workspace=workspace, name="Test alert", event_type="test", channels=["in_app"]
+    )
+    event = AlertEvent.objects.create(
+        workspace=workspace,
+        rule=rule,
+        event_type="test",
+        deduplication_key="current-user",
+    )
+    Notification.objects.create(
+        workspace=workspace,
+        event=event,
+        recipient=user,
+        title="Visible alert",
+        body="Visible",
+        priority=NotificationPriority.HIGH,
+    )
+    Notification.objects.create(
+        workspace=workspace,
+        event=event,
+        recipient=other,
+        title="Hidden alert",
+        body="Hidden",
+        priority=NotificationPriority.HIGH,
+    )
+    client.force_login(user)
+
+    response = client.get(reverse("command_center:notification-center"))
+
+    assert response.status_code == 200
+    assert b"Visible alert" in response.content
+    assert b"Hidden alert" not in response.content
 
 
 def test_create_hunt_profile_builds_version_and_activates(client):

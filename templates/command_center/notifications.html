@@ -1,0 +1,19 @@
+{% extends "command_center/base.html" %}
+{% load static %}
+{% block title %}Notifications{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'command_center/notifications.css' %}">{% endblock %}
+{% block content %}
+<section class="notification-hero">
+  <div><p class="eyebrow">Signal watch</p><h1>Notification center</h1><p>Your durable record of alerts, delivery health, and decisions that need attention.</p></div>
+  <div class="notification-totals"><span><strong>{{ unread_count }}</strong> unread</span><span class="critical"><strong>{{ critical_count }}</strong> critical</span></div>
+</section>
+<section class="notification-list">
+  {% for notification in notifications %}
+  <article class="notification-card {{ notification.priority }} {% if notification.read_at %}read{% endif %}">
+    <span class="priority-light"></span>
+    <div class="notification-copy"><div class="notification-meta"><span>{{ notification.get_priority_display }}</span><time>{{ notification.created_at|timesince }} ago</time>{% if notification.grouped_count > 1 %}<span>×{{ notification.grouped_count }}</span>{% endif %}</div><h2>{{ notification.title }}</h2><p>{{ notification.body }}</p><small>Rule: {{ notification.event.rule.name }}</small></div>
+    <div class="notification-actions"><span class="status">{{ notification.get_status_display }}</span>{% if notification.requires_acknowledgement and not notification.acknowledged_at %}<form method="post" action="{% url 'command_center:acknowledge-notification' notification.pk %}">{% csrf_token %}<button>Acknowledge</button></form>{% endif %}</div>
+  </article>
+  {% empty %}<div class="notification-empty"><span>✧</span><h2>All quiet in the territory</h2><p>Alerts will collect here without interrupting your hunt.</p></div>{% endfor %}
+</section>
+{% endblock %}

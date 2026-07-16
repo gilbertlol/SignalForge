@@ -47,6 +47,7 @@ LOCAL_APPS = [
     "apps.communications",
     "apps.command_center",
     "apps.tasks",
+    "apps.notifications",
     "apps.audit",
     "apps.integrations",
 ]
@@ -180,6 +181,18 @@ CELERY_BEAT_SCHEDULE = {
     "dispatch-scheduled-discoveries": {
         "task": "discovery.dispatch_scheduled_discoveries",
         "schedule": 60 * 60,  # hourly; the task itself only starts a run once per day per profile
+    },
+    "dispatch-notification-deliveries": {
+        "task": "notifications.dispatch_due_deliveries",
+        "schedule": 60,
+    },
+    "escalate-unacknowledged-notifications": {
+        "task": "notifications.escalate_unacknowledged",
+        "schedule": 5 * 60,
+    },
+    "send-notification-digests": {
+        "task": "notifications.send_daily_digests",
+        "schedule": 24 * 60 * 60,
     },
 }
 

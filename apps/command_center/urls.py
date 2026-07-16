@@ -7,6 +7,12 @@ app_name = "command_center"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("crew/", views.crew, name="crew"),
+    path("notifications/", views.notification_center, name="notification-center"),
+    path(
+        "notifications/<uuid:pk>/acknowledge/",
+        views.acknowledge_notification,
+        name="acknowledge-notification",
+    ),
     path("review/", views.review_queue, name="review-queue"),
     path("hunt-profiles/", views.hunt_profiles, name="hunt-profiles"),
     path("hunt-profiles/new/", views.create_hunt_profile, name="create-hunt-profile"),

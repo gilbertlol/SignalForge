@@ -21,6 +21,18 @@ from apps.integrations.views import (
     ModelInvocationViewSet,
     ModelRouteViewSet,
 )
+from apps.notifications.views import (
+    AlertEventViewSet,
+    AlertRuleViewSet,
+    DashboardViewSet,
+    DashboardWidgetViewSet,
+    DeliveryAttemptViewSet,
+    NotificationEscalationPolicyViewSet,
+    NotificationViewSet,
+    QuietHoursViewSet,
+    SavedFilterViewSet,
+    UserPreferenceViewSet,
+)
 from apps.opportunities.views import OpportunityViewSet
 from apps.organizations.views import OrganizationViewSet
 from apps.scoring.views import ScoreSnapshotViewSet
@@ -58,6 +70,22 @@ router.register("opportunities", OpportunityViewSet, basename="opportunity")
 router.register("scores", ScoreSnapshotViewSet, basename="scoresnapshot")
 router.register("hunt-profiles", HuntProfileViewSet, basename="huntprofile")
 router.register("discovery-runs", DiscoveryRunViewSet, basename="discoveryrun")
+router.register("dashboards", DashboardViewSet, basename="dashboard")
+router.register("dashboard-widgets", DashboardWidgetViewSet, basename="dashboard-widget")
+router.register("saved-filters", SavedFilterViewSet, basename="saved-filter")
+router.register("alert-rules", AlertRuleViewSet, basename="alert-rule")
+router.register("alert-events", AlertEventViewSet, basename="alert-event")
+router.register("notifications", NotificationViewSet, basename="notification")
+router.register("notification-deliveries", DeliveryAttemptViewSet, basename="notification-delivery")
+router.register(
+    "notification-preferences", UserPreferenceViewSet, basename="notification-preference"
+)
+router.register("quiet-hours", QuietHoursViewSet, basename="quiet-hours")
+router.register(
+    "notification-escalations",
+    NotificationEscalationPolicyViewSet,
+    basename="notification-escalation",
+)
 router.register("operators", OperatorViewSet, basename="operator")
 router.register("operator-teams", TeamViewSet, basename="operator-team")
 router.register("assignment-pools", AssignmentPoolViewSet, basename="assignment-pool")

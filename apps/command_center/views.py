@@ -52,6 +52,8 @@ from apps.integrations.services import (
     check_provider,
     lead_source_availability,
 )
+from apps.notifications.models import Notification
+from apps.notifications.services import NotificationPolicyError, acknowledge
 from apps.opportunities.models import Opportunity, OpportunityStatus
 from apps.organizations.models import Organization
 from apps.organizations.services import create_organization
@@ -138,6 +140,50 @@ def crew(request: HttpRequest) -> HttpResponse:
             .order_by("-created_at")[:12],
         },
     )
+
+
+@login_required
+def notification_center(request: HttpRequest) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    notification_queryset = (
+        Notification.objects.filter(
+            Q(recipient=request.user) | Q(escalation_history__escalated_to=request.user),
+            workspace=workspace,
+        )
+        .select_related("event__rule")
+        .distinct()
+    )
+    return _render(
+        request,
+        "command_center/notifications.html",
+        {
+            "notifications": notification_queryset[:100],
+            "unread_count": notification_queryset.filter(read_at__isnull=True).count(),
+            "critical_count": notification_queryset.filter(
+                priority="critical", acknowledged_at__isnull=True
+            ).count(),
+        },
+    )
+
+
+@require_POST
+@login_required
+def acknowledge_notification(request: HttpRequest, pk) -> HttpResponse:
+    workspace = get_request_workspace(request)
+    notification = get_object_or_404(
+        Notification.objects.filter(
+            Q(recipient=request.user) | Q(escalation_history__escalated_to=request.user)
+        ).distinct(),
+        workspace=workspace,
+        pk=pk,
+    )
+    try:
+        acknowledge(notification, user=cast(User, request.user))
+    except NotificationPolicyError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Alert acknowledged.")
+    return redirect("command_center:notification-center")
 
 
 def _render(request: HttpRequest, template: str, context: dict) -> HttpResponse:

@@ -22,7 +22,7 @@
         <span class="search-spark" aria-hidden="true">⌕</span><input id="global-q" name="q" type="search" placeholder="Search the known territory…" value="{{ request.GET.q|default:'' }}">
         <kbd>/</kbd>
       </form>
-      <div class="account"><span class="account-orb">{{ request.user.display_name|default:request.user.email|first|upper }}</span><span class="account-name">{{ request.user.display_name|default:request.user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="icon-button" aria-label="Sign out" title="Sign out">↗</button></form></div>
+      <div class="account"><a class="icon-button" href="{% url 'command_center:notification-center' %}" aria-label="Notifications" title="Notifications">◌</a><span class="account-orb">{{ request.user.display_name|default:request.user.email|first|upper }}</span><span class="account-name">{{ request.user.display_name|default:request.user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="icon-button" aria-label="Sign out" title="Sign out">↗</button></form></div>
     </header>
     <div class="app-shell">
       <nav class="sidebar" aria-label="Primary">
@@ -40,6 +40,7 @@
         {% if nav.communications %}<a href="{% url 'command_center:inbox' %}"><span aria-hidden="true">⌁</span> Messages</a>{% endif %}
         {% if nav.providers %}<a href="{% url 'command_center:provider-settings' %}"><span aria-hidden="true">⚙</span> Sources & models</a>{% endif %}
         {% if nav.agents %}<a class="{% if request.resolver_match.url_name == 'crew' %}active{% endif %}" href="{% url 'command_center:crew' %}"><span aria-hidden="true">◌</span> Crew</a>{% endif %}
+        <a class="{% if request.resolver_match.url_name == 'notification-center' %}active{% endif %}" href="{% url 'command_center:notification-center' %}"><span aria-hidden="true">◉</span> Notifications</a>
         <div class="sidebar-hope"><span aria-hidden="true">✧</span><p><strong>Stay curious.</strong><br>The right client may be one signal away.</p></div>
       </nav>
       <main id="main" class="content" tabindex="-1">
